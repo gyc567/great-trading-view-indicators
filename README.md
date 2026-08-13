@@ -22,8 +22,8 @@ ready to add to a chart; library functions in `libraries/` can be imported via
 
 ## Available Indicators
 
-### `jl_trap_system.pine`
-**JL + Trap 高胜率系统 vFinal（精准入场 + 正确支撑阻力反转区）【优化版】**
+### `EricPrecision Trap Reversal Pro.pine`
+**EricPrecision Trap Reversal Pro**（高胜率精准入场 + 正确支撑阻力反转区）【优化版】
 
 High-probability trading system combining Supertrend, Trap channel (EMA + ATR envelope),
 and Fibonacci levels with precision entry for reversals and trend-following entries.

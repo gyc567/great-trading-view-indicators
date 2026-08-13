@@ -1,5 +1,5 @@
 //@version=6
-indicator(title="JL + Trap 高胜率系统 vFinal（精准入场 + 正确支撑阻力反转区）【优化版】", overlay=true, max_labels_count=500, max_bars_back=5000)
+indicator(title="EricPrecision Trap Reversal Pro", overlay=true, max_labels_count=500, max_bars_back=5000)
 
 // ==================== 显示控制 ====================
 show_supertrend      = input.bool(true,  "显示 Supertrend", group="显示")
