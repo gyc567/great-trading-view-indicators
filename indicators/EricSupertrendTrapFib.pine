@@ -1,5 +1,5 @@
 //@version=6
-indicator(title="EricPrecision Trap Reversal Pro", overlay=true, max_labels_count=500, max_bars_back=5000)
+indicator(title="EricSupertrendTrapFib", overlay=true, max_labels_count=500, max_bars_back=5000)
 
 // ==================== 显示控制 ====================
 show_supertrend      = input.bool(true,  "显示 Supertrend", group="显示")
