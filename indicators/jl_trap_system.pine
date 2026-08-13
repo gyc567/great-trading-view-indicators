@@ -1,5 +1,5 @@
 //@version=6
-indicator(title="JL + Trap 高胜率系统（反转+顺势+未来潜在反转区）", overlay=true, max_labels_count=500, max_bars_back=5000)
+indicator(title="JL + Trap 高胜率系统 vFinal（精准入场 + 正确支撑阻力反转区）【优化版】", overlay=true, max_labels_count=500, max_bars_back=5000)
 
 // ==================== 显示控制 ====================
 show_supertrend      = input.bool(true,  "显示 Supertrend", group="显示")
@@ -19,22 +19,23 @@ atrline   = input.float(1.5, "折扣/溢价倍数", step=0.1, group="Supertrend"
 
 // ==================== Trap 参数 ====================
 envelope_len = input.int(55, "通道平滑长度", group="Trap")
-multiplier   = input.float(2.5, "通道宽度倍数", step=0.1, group="Trap")
-trap_window  = input.int(8, "Trap 窗口", group="Trap")
-min_prob     = input.int(55, "反转最低概率%", minval=45, maxval=85, group="Trap")
+multiplier   = input.float(2.8, "通道宽度倍数", step=0.1, group="Trap")
+trap_window  = input.int(6, "Trap 窗口", group="Trap")
+min_prob     = input.int(58, "反转最低概率%", minval=50, maxval=80, group="Trap")
 
 // ==================== 高胜率过滤 ====================
 useRSI   = input.bool(true, "启用 RSI 过滤", group="高胜率过滤")
 rsiLen   = input.int(14, "RSI 长度", group="高胜率过滤")
-rsiOB    = input.int(68, "RSI 超买", group="高胜率过滤")
-rsiOS    = input.int(32, "RSI 超卖", group="高胜率过滤")
+rsiOB    = input.int(65, "RSI 超买", group="高胜率过滤")
+rsiOS    = input.int(35, "RSI 超卖", group="高胜率过滤")
 
 useADX   = input.bool(true, "启用 ADX 趋势过滤", group="高胜率过滤")
 adxLen   = input.int(14, "ADX 长度", group="高胜率过滤")
-adxMin   = input.float(16.0, "ADX 最小值", group="高胜率过滤")
+adxMin   = input.float(15.0, "ADX 最小值", group="高胜率过滤")
 
-minRR    = input.float(1.4, "最低风险回报比", step=0.1, group="高胜率过滤")
-cooldown = input.int(5, "信号冷却K线", group="高胜率过滤")
+minRR    = input.float(1.5, "最低风险回报比", step=0.1, group="高胜率过滤")
+cooldown = input.int(8, "信号冷却K线", group="高胜率过滤")
+nearATR  = input.float(1.5, "反转靠近极值 ATR倍数", step=0.1, group="高胜率过滤")
 
 // ==================== Supertrend ====================
 [supertrend, direction] = ta.supertrend(factor, atrPeriod)
@@ -49,7 +50,6 @@ plot(direction < 0 and show_premiumdiscount ? upatrline : na, "折扣区", color
 plot(direction > 0 and show_premiumdiscount ? dnatrline : na, "溢价区", color=color.white, style=plot.style_linebr)
 
 bodyMid = plot((open + close)/2, display=display.none)
-// 加深颜色（透明度从90改为70）
 fill(bodyMid, plot(direction < 0 and show_supertrend ? supertrend : na), color.new(color.green, 70))
 fill(bodyMid, plot(direction > 0 and show_supertrend ? supertrend : na), color.new(color.red, 70))
 
@@ -75,10 +75,10 @@ bull_trap = close > lower_band and (low[1]  < lower_band or close[1] < lower_ban
 
 // ==================== RSI + 概率 ====================
 rsi = ta.rsi(close, rsiLen)
-bull_prob = rsi < 35 ? 68 : rsi < 45 ? 58 : 48
-bear_prob = rsi > 65 ? 68 : rsi > 55 ? 58 : 48
+bull_prob = rsi < 30 ? 72 : rsi < 40 ? 62 : 52
+bear_prob = rsi > 70 ? 72 : rsi > 60 ? 62 : 52
 
-// ==================== 趋势转折 & 小趋势高低点 ====================
+// ==================== 趋势转折 & 高低点 ====================
 turnGreen = ta.change(direction) < 0
 turnRed   = ta.change(direction) > 0
 
@@ -125,6 +125,13 @@ var line fib_618 = na
 var line fib_786 = na
 var line fib_1618 = na
 
+var label fibLabel0 = na
+var label fibLabel1 = na
+var label fibLabel05 = na
+var label fibLabel618 = na
+var label fibLabel786 = na
+var label fibLabel1618 = na
+
 if barstate.islast and show_fib and not na(use_hh) and not na(use_ll) and use_hh > use_ll
     line.delete(fib_h)
     line.delete(fib_l)
@@ -133,12 +140,26 @@ if barstate.islast and show_fib and not na(use_hh) and not na(use_ll) and use_hh
     line.delete(fib_786)
     line.delete(fib_1618)
 
-    fib_h    := line.new(bar_index - 60, use_hh,  bar_index + 15, use_hh,  color=color.purple, width=1)
-    fib_l    := line.new(bar_index - 60, use_ll,  bar_index + 15, use_ll,  color=color.purple, width=1)
-    fib_m    := line.new(bar_index - 60, fib05,   bar_index + 15, fib05,   color=color.new(color.purple, 40), width=1)
-    fib_618  := line.new(bar_index - 60, fib0618, bar_index + 15, fib0618, color=color.orange, width=1)
-    fib_786  := line.new(bar_index - 60, fib0786, bar_index + 15, fib0786, color=color.orange, width=1)
-    fib_1618 := line.new(bar_index - 60, fib1618, bar_index + 15, fib1618, color=color.teal, width=1)
+    label.delete(fibLabel0)
+    label.delete(fibLabel1)
+    label.delete(fibLabel05)
+    label.delete(fibLabel618)
+    label.delete(fibLabel786)
+    label.delete(fibLabel1618)
+
+    fib_h    := line.new(bar_index - 60, use_hh,  bar_index + 20, use_hh,  color=color.purple, width=1)
+    fib_l    := line.new(bar_index - 60, use_ll,  bar_index + 20, use_ll,  color=color.purple, width=1)
+    fib_m    := line.new(bar_index - 60, fib05,   bar_index + 20, fib05,   color=color.new(color.purple, 40), width=1)
+    fib_618  := line.new(bar_index - 60, fib0618, bar_index + 20, fib0618, color=color.orange, width=1)
+    fib_786  := line.new(bar_index - 60, fib0786, bar_index + 20, fib0786, color=color.orange, width=1)
+    fib_1618 := line.new(bar_index - 60, fib1618, bar_index + 20, fib1618, color=color.teal, width=1)
+
+    fibLabel1    := label.new(bar_index + 22, use_hh,  "1.0 (" + str.tostring(use_hh, format.mintick) + ")", style=label.style_none, textcolor=color.purple, size=size.normal)
+    fibLabel0    := label.new(bar_index + 22, use_ll,  "0.0 (" + str.tostring(use_ll, format.mintick) + ")", style=label.style_none, textcolor=color.purple, size=size.normal)
+    fibLabel05   := label.new(bar_index + 22, fib05,   "0.5 (" + str.tostring(fib05, format.mintick) + ")", style=label.style_none, textcolor=color.gray, size=size.normal)
+    fibLabel618  := label.new(bar_index + 22, fib0618, "0.618 (" + str.tostring(fib0618, format.mintick) + ")", style=label.style_none, textcolor=color.orange, size=size.normal)
+    fibLabel786  := label.new(bar_index + 22, fib0786, "0.786 (" + str.tostring(fib0786, format.mintick) + ")", style=label.style_none, textcolor=color.orange, size=size.normal)
+    fibLabel1618 := label.new(bar_index + 22, fib1618, "1.618 (" + str.tostring(fib1618, format.mintick) + ")", style=label.style_none, textcolor=color.teal, size=size.normal)
 
 // ==================== 未来潜在反转区 ====================
 var box prz_res_box = na
@@ -152,19 +173,23 @@ if barstate.islast and show_prz and not na(use_hh) and not na(use_ll)
     label.delete(prz_res_label)
     label.delete(prz_sup_label)
 
-    res_top = math.max(use_hh, fib1618)
-    res_bot = math.min(use_hh, fib0786)
-    prz_res_box := box.new(bar_index, res_top, bar_index + 25, res_bot,
-                           bgcolor=color.new(color.red, 85), border_color=color.new(color.red, 50), border_width=1)
-    prz_res_label := label.new(bar_index + 18, (res_top + res_bot)/2, "潜在阻力反转区",
-                               style=label.style_label_left, color=color.new(color.red, 30), textcolor=color.white, size=size.small)
+    resist_mid = use_hh
+    resist_top = resist_mid + ATR * 0.7
+    resist_bot = resist_mid - ATR * 0.4
 
-    sup_top = math.max(use_ll, fib05)
-    sup_bot = math.min(use_ll, fib_ext)
-    prz_sup_box := box.new(bar_index, sup_top, bar_index + 25, sup_bot,
-                           bgcolor=color.new(color.green, 85), border_color=color.new(color.green, 50), border_width=1)
-    prz_sup_label := label.new(bar_index + 18, (sup_top + sup_bot)/2, "潜在支撑反转区",
-                               style=label.style_label_left, color=color.new(color.green, 30), textcolor=color.white, size=size.small)
+    prz_res_box := box.new(bar_index, resist_top, bar_index + 30, resist_bot,
+                           bgcolor=color.new(color.red, 82), border_color=color.new(color.red, 40), border_width=1)
+    prz_res_label := label.new(bar_index + 22, resist_mid, "潜在阻力反转区\n" + str.tostring(resist_mid, format.mintick),
+                               style=label.style_label_left, color=color.new(color.red, 20), textcolor=color.white, size=size.small)
+
+    support_mid = use_ll
+    support_top = support_mid + ATR * 0.4
+    support_bot = support_mid - ATR * 0.7
+
+    prz_sup_box := box.new(bar_index, support_top, bar_index + 30, support_bot,
+                           bgcolor=color.new(color.green, 82), border_color=color.new(color.green, 40), border_width=1)
+    prz_sup_label := label.new(bar_index + 22, support_mid, "潜在支撑反转区\n" + str.tostring(support_mid, format.mintick),
+                               style=label.style_label_left, color=color.new(color.green, 20), textcolor=color.white, size=size.small)
 
 // ==================== 公共过滤 ====================
 [_, _, adx] = ta.dmi(adxLen, adxLen)
@@ -172,35 +197,61 @@ if barstate.islast and show_prz and not na(use_hh) and not na(use_ll)
 inDiscount = direction < 0 and close <= upatrline
 inPremium  = direction > 0 and close >= dnatrline
 
-inFibGoldLong  = close >= fib05 * 0.997 and close <= fib0786 * 1.003
-inFibGoldShort = close <= fib05 * 1.003 and close >= (use_hh - 0.786 * (use_hh - use_ll)) * 0.997
+inFibGoldLong  = close >= fib05 * 0.995 and close <= fib0786 * 1.005
+inFibGoldShort = close <= fib05 * 1.005 and close >= (use_hh - 0.786 * (use_hh - use_ll)) * 0.995
 
-// ==================== 反转信号 ====================
-long_rev_cond  = bull_trap and bull_prob >= min_prob and (direction > 0 or turnGreen)
-short_rev_cond = bear_trap and bear_prob >= min_prob and (direction < 0 or turnRed)
+near_low  = math.abs(close - curr_low)  <= ATR * nearATR
+near_high = math.abs(close - curr_high) <= ATR * nearATR
 
-// ==================== 顺势信号 ====================
-long_trend_cond  = direction < 0 and inDiscount and inFibGoldLong and (not useRSI or (rsi < rsiOB and rsi > 38)) and (not useADX or adx >= adxMin) and close > open
-short_trend_cond = direction > 0 and inPremium  and inFibGoldShort and (not useRSI or (rsi > rsiOS and rsi < 62)) and (not useADX or adx >= adxMin) and close < open
+// ==================== 【优化核心】Trap 真实极值（精准入场用） ====================
+ref_low_rev  = curr_low
+ref_high_rev = curr_high
 
-// ==================== 止损止盈 ====================
-long_sl   = math.min(curr_low, supertrend) - ATR * 0.3
+if bull_trap and bars_below[1] > 0
+    ref_low_rev := ta.lowest(low[1], bars_below[1])
+
+if bear_trap and bars_above[1] > 0
+    ref_high_rev := ta.highest(high[1], bars_above[1])
+
+// ==================== 反转信号（优化后） ====================
+long_rev_cond  = (bull_trap or turnGreen) and near_low  and bull_prob >= min_prob and rsi < 45 and (close - ref_low_rev) <= ATR * 1.5
+short_rev_cond = (bear_trap or turnRed)  and near_high and bear_prob >= min_prob and rsi > 55 and (ref_high_rev - close) <= ATR * 1.5
+
+// ==================== 顺势信号（保持原逻辑） ====================
+long_trend_cond  = direction < 0 and inDiscount and (inFibGoldLong or close <= supertrend * 1.01) and (not useRSI or rsi < rsiOB) and (not useADX or adx >= adxMin) and close > open
+short_trend_cond = direction > 0 and inPremium  and (inFibGoldShort or close >= supertrend * 0.99) and (not useRSI or rsi > rsiOS) and (not useADX or adx >= adxMin) and close < open
+
+// ==================== 止损止盈（区分反转 / 顺势） ====================
+// 顺势用原逻辑
+long_sl   = curr_low  - ATR * 0.4
 long_tp1  = fib1
 long_tp2  = fib1618
+long_rr   = (long_tp1 - close) / math.max(close - long_sl, syminfo.mintick)
 
-short_sl  = math.max(curr_high, supertrend) + ATR * 0.3
+short_sl  = curr_high + ATR * 0.4
 short_tp1 = fib0
 short_tp2 = fib_ext
-
-long_rr   = (long_tp1 - close) / math.max(close - long_sl, syminfo.mintick)
 short_rr  = (close - short_tp1) / math.max(short_sl - close, syminfo.mintick)
+
+// 【优化】反转专用：入场贴近极值，止损加深
+long_rev_entry = ref_low_rev + ATR * 0.2
+long_rev_sl    = ref_low_rev - ATR * 0.8
+long_rev_tp1   = fib1
+long_rev_tp2   = fib1618
+long_rev_rr    = (long_rev_tp1 - long_rev_entry) / math.max(long_rev_entry - long_rev_sl, syminfo.mintick)
+
+short_rev_entry = ref_high_rev - ATR * 0.2
+short_rev_sl    = ref_high_rev + ATR * 0.8
+short_rev_tp1   = fib0
+short_rev_tp2   = fib_ext
+short_rev_rr    = (short_rev_entry - short_rev_tp1) / math.max(short_rev_sl - short_rev_entry, syminfo.mintick)
 
 // ==================== 最终信号 ====================
 var int lastLongBar  = 0
 var int lastShortBar = 0
 
-long_rev_signal   = long_rev_cond  and long_rr >= minRR and show_rev_signals   and (bar_index - lastLongBar > cooldown)
-short_rev_signal  = short_rev_cond and short_rr >= minRR and show_rev_signals  and (bar_index - lastShortBar > cooldown)
+long_rev_signal   = long_rev_cond  and long_rev_rr >= minRR and show_rev_signals   and (bar_index - lastLongBar > cooldown)
+short_rev_signal  = short_rev_cond and short_rev_rr >= minRR and show_rev_signals  and (bar_index - lastShortBar > cooldown)
 
 long_trend_signal  = long_trend_cond  and long_rr >= minRR and show_trend_signals  and (bar_index - lastLongBar > cooldown)
 short_trend_signal = short_trend_cond and short_rr >= minRR and show_trend_signals and (bar_index - lastShortBar > cooldown)
@@ -218,16 +269,40 @@ plotshape(long_trend_signal,  title="顺势开多", style=shape.triangleup,   lo
 plotshape(short_trend_signal, title="顺势开空", style=shape.triangledown, location=location.abovebar, color=color.red,  size=size.large, text="顺势开空")
 
 if long_rev_signal
-    label.new(bar_index, low, "【反转开多】\n概率≈" + str.tostring(bull_prob) + "%\n入场:" + str.tostring(close, format.mintick) + "\n止损:" + str.tostring(long_sl, format.mintick) + "\n止盈1:" + str.tostring(long_tp1, format.mintick) + "\n止盈2:" + str.tostring(long_tp2, format.mintick) + "\nRR 1:" + str.tostring(long_rr, "#.##"), style=label.style_label_up, color=color.new(color.aqua, 15), textcolor=color.white, size=size.normal)
+    label.new(bar_index, low,
+      "【反转开多】\n建议入场: " + str.tostring(long_rev_entry, format.mintick) + " (近极值)" +
+      "\n止损: " + str.tostring(long_rev_sl, format.mintick) +
+      "\n止盈1: " + str.tostring(long_rev_tp1, format.mintick) +
+      "\n止盈2: " + str.tostring(long_rev_tp2, format.mintick) +
+      "\nRR 1:" + str.tostring(long_rev_rr, "#.##"),
+      style=label.style_label_up, color=color.new(color.aqua, 10), textcolor=color.white, size=size.normal)
 
 if short_rev_signal
-    label.new(bar_index, high, "【反转开空】\n概率≈" + str.tostring(bear_prob) + "%\n入场:" + str.tostring(close, format.mintick) + "\n止损:" + str.tostring(short_sl, format.mintick) + "\n止盈1:" + str.tostring(short_tp1, format.mintick) + "\n止盈2:" + str.tostring(short_tp2, format.mintick) + "\nRR 1:" + str.tostring(short_rr, "#.##"), style=label.style_label_down, color=color.new(color.fuchsia, 15), textcolor=color.white, size=size.normal)
+    label.new(bar_index, high,
+      "【反转开空】\n建议入场: " + str.tostring(short_rev_entry, format.mintick) + " (近极值)" +
+      "\n止损: " + str.tostring(short_rev_sl, format.mintick) +
+      "\n止盈1: " + str.tostring(short_rev_tp1, format.mintick) +
+      "\n止盈2: " + str.tostring(short_rev_tp2, format.mintick) +
+      "\nRR 1:" + str.tostring(short_rev_rr, "#.##"),
+      style=label.style_label_down, color=color.new(color.fuchsia, 10), textcolor=color.white, size=size.normal)
 
 if long_trend_signal
-    label.new(bar_index, low, "【顺势开多】\n入场:" + str.tostring(close, format.mintick) + "\n止损:" + str.tostring(long_sl, format.mintick) + "\n止盈1:" + str.tostring(long_tp1, format.mintick) + "\n止盈2:" + str.tostring(long_tp2, format.mintick) + "\nRR 1:" + str.tostring(long_rr, "#.##"), style=label.style_label_up, color=color.new(color.lime, 15), textcolor=color.black, size=size.normal)
+    label.new(bar_index, low,
+      "【顺势开多】\n入场: " + str.tostring(close, format.mintick) +
+      "\n止损: " + str.tostring(long_sl, format.mintick) +
+      "\n止盈1: " + str.tostring(long_tp1, format.mintick) +
+      "\n止盈2: " + str.tostring(long_tp2, format.mintick) +
+      "\nRR 1:" + str.tostring(long_rr, "#.##"),
+      style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.normal)
 
 if short_trend_signal
-    label.new(bar_index, high, "【顺势开空】\n入场:" + str.tostring(close, format.mintick) + "\n止损:" + str.tostring(short_sl, format.mintick) + "\n止盈1:" + str.tostring(short_tp1, format.mintick) + "\n止盈2:" + str.tostring(short_tp2, format.mintick) + "\nRR 1:" + str.tostring(short_rr, "#.##"), style=label.style_label_down, color=color.new(color.red, 15), textcolor=color.white, size=size.normal)
+    label.new(bar_index, high,
+      "【顺势开空】\n入场: " + str.tostring(close, format.mintick) +
+      "\n止损: " + str.tostring(short_sl, format.mintick) +
+      "\n止盈1: " + str.tostring(short_tp1, format.mintick) +
+      "\n止盈2: " + str.tostring(short_tp2, format.mintick) +
+      "\nRR 1:" + str.tostring(short_rr, "#.##"),
+      style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.normal)
 
 // ==================== 止损止盈线 ====================
 var line ls1 = na
@@ -237,7 +312,15 @@ var line ss1 = na
 var line st1 = na
 var line st2 = na
 
-if (long_rev_signal or long_trend_signal) and show_sl_tp
+if long_rev_signal and show_sl_tp
+    line.delete(ls1)
+    line.delete(lt1)
+    line.delete(lt2)
+    ls1 := line.new(bar_index, long_rev_sl,  bar_index + 12, long_rev_sl,  color=color.red,  width=2, style=line.style_dashed)
+    lt1 := line.new(bar_index, long_rev_tp1, bar_index + 12, long_rev_tp1, color=color.teal, width=2, style=line.style_dashed)
+    lt2 := line.new(bar_index, long_rev_tp2, bar_index + 12, long_rev_tp2, color=color.blue, width=1, style=line.style_dotted)
+
+if long_trend_signal and show_sl_tp
     line.delete(ls1)
     line.delete(lt1)
     line.delete(lt2)
@@ -245,7 +328,15 @@ if (long_rev_signal or long_trend_signal) and show_sl_tp
     lt1 := line.new(bar_index, long_tp1, bar_index + 12, long_tp1, color=color.teal, width=2, style=line.style_dashed)
     lt2 := line.new(bar_index, long_tp2, bar_index + 12, long_tp2, color=color.blue, width=1, style=line.style_dotted)
 
-if (short_rev_signal or short_trend_signal) and show_sl_tp
+if short_rev_signal and show_sl_tp
+    line.delete(ss1)
+    line.delete(st1)
+    line.delete(st2)
+    ss1 := line.new(bar_index, short_rev_sl,  bar_index + 12, short_rev_sl,  color=color.red,  width=2, style=line.style_dashed)
+    st1 := line.new(bar_index, short_rev_tp1, bar_index + 12, short_rev_tp1, color=color.teal, width=2, style=line.style_dashed)
+    st2 := line.new(bar_index, short_rev_tp2, bar_index + 12, short_rev_tp2, color=color.blue, width=1, style=line.style_dotted)
+
+if short_trend_signal and show_sl_tp
     line.delete(ss1)
     line.delete(st1)
     line.delete(st2)
@@ -254,7 +345,7 @@ if (short_rev_signal or short_trend_signal) and show_sl_tp
     st2 := line.new(bar_index, short_tp2, bar_index + 12, short_tp2, color=color.blue, width=1, style=line.style_dotted)
 
 // ==================== 警报 ====================
-alertcondition(long_rev_signal,   title="反转开多", message="【反转开多】{{ticker}}")
-alertcondition(short_rev_signal,  title="反转开空", message="【反转开空】{{ticker}}")
-alertcondition(long_trend_signal, title="顺势开多", message="【顺势开多】{{ticker}}")
-alertcondition(short_trend_signal,title="顺势开空", message="【顺势开空】{{ticker}}")
+alertcondition(long_rev_signal,   title="反转开多", message="【反转开多】建议入场 {{close}} {{ticker}}（近极值）")
+alertcondition(short_rev_signal,   title="反转开空", message="【反转开空】建议入场 {{close}} {{ticker}}（近极值）")
+alertcondition(long_trend_signal,  title="顺势开多", message="【顺势开多】入场 {{close}} {{ticker}}")
+alertcondition(short_trend_signal, title="顺势开空", message="【顺势开空】入场 {{close}} {{ticker}}")
