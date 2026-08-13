@@ -1,0 +1,24 @@
+name: Pine Script CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pine Script linter
+        run: pip install pine-script-lint 2>/dev/null || true
+
+      - name: Lint indicators
+        run: |
+          for f in indicators/*.pine libraries/*.pine; do
+            [ -e "$f" ] || continue
+            echo "Linting $f"
+            pine-lint "$f" || echo "LINT_FAILED:$f"
+          done

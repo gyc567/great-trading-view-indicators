@@ -1,0 +1,23 @@
+# TradingView
+*.pine.bak
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# Logs
+*.log
+
+# LoopX / Codex state (do not commit private evidence)
+.loopx/
+.codex/
+
+# Python / misc
+__pycache__/
+*.pyc
+.pytest_cache/

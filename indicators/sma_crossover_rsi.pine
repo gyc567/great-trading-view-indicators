@@ -1,0 +1,29 @@
+//@version=5
+indicator("SMA Crossover + RSI", overlay=true)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+fastLen  = input.int(9,   "Fast SMA Length",   minval=1)
+slowLen  = input.int(21,  "Slow SMA Length",    minval=1)
+rsiLen   = input.int(14,  "RSI Length",         minval=1)
+rsiUp    = input.int(70,  "RSI Overbought",     minval=50, maxval=100)
+rsiDn    = input.int(30,  "RSI Oversold",       minval=0,  maxval=50)
+
+// ── SMAs ───────────────────────────────────────────────────────────────────
+fastSMA = ta.sma(close, fastLen)
+slowSMA = ta.sma(close, slowLen)
+
+// ── RSI ─────────────────────────────────────────────────────────────────────
+rsi = ta.rsi(close, rsiLen)
+
+// ── Plots ──────────────────────────────────────────────────────────────────
+plot(fastSMA, "Fast SMA", color.lime, linewidth=1)
+plot(slowSMA, "Slow SMA", color.red,  linewidth=1)
+
+// Overlay markers
+plotshape(ta.crossover(fastSMA, slowSMA), "Long",  shape.triangleup,   location.belowbar, color.lime, size=size.small)
+plotshape(ta.crossunder(fastSMA, slowSMA), "Short", shape.triangledown, location.abovebar, color.red,  size=size.small)
+
+// RSI pane
+plot(rsi, "RSI", color.purple, linewidth=1)
+hline(rsiUp, "Overbought", color.red, linestyle=hline.style_dotted)
+hline(rsiDn, "Oversold",   color.green, linestyle=hline.style_dotted)
