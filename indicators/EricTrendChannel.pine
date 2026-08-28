@@ -1,0 +1,68 @@
+//@version=6
+indicator("百万Eric风格 趋势通道（主图专用）", overlay=true, max_labels_count=500)
+
+// ========== 参数 ==========
+len         = input.int(50, "通道基础长度", group="趋势通道")
+atrLen      = input.int(14, "ATR长度", group="趋势通道")
+atrMult     = input.float(1.8, "通道宽度倍数", step=0.1, group="趋势通道")
+smooth      = input.int(3, "通道平滑", group="趋势通道")
+showLabels  = input.bool(true, "显示趋势标签", group="显示")
+showChannel = input.bool(true, "显示趋势通道", group="显示")
+lineWidth   = input.int(3, "通道线宽", minval=1, maxval=5, group="显示")
+
+// ========== 计算 ==========
+basis = ta.ema(close, len)
+atr   = ta.atr(atrLen)
+
+upper = basis + atr * atrMult
+lower = basis - atr * atrMult
+
+u = ta.sma(upper, smooth)
+l = ta.sma(lower, smooth)
+
+trend = close > basis ? 1 : close < basis ? -1 : 0
+
+// ========== 清晰趋势通道 ==========
+plot_u = plot(showChannel ? u : na, "上轨",
+     color = trend == 1 ? #00E676 : #FF5252,
+     linewidth=lineWidth)
+
+plot_l = plot(showChannel ? l : na, "下轨",
+     color = trend == 1 ? #00E676 : #FF5252,
+     linewidth=lineWidth)
+
+fill(plot_u, plot_l,
+     color = trend == 1 ? color.new(#00E676, 75) :
+             trend == -1 ? color.new(#FF5252, 75) :
+             color.new(color.gray, 90),
+     title="趋势通道填充")
+
+plot(showChannel ? basis : na, "中线", color=color.new(color.white, 50), linewidth=1, style=plot.style_linebr)
+
+// ========== 标签 ==========
+var label lastLabel = na
+if showLabels and trend != trend[1]
+    label.delete(lastLabel)
+    txt = trend == 1 ? "趋势多" : "趋势空"
+    col = trend == 1 ? #00E676 : #FF5252
+    yPos = trend == 1 ? low : high
+    lastLabel := label.new(bar_index, yPos, txt,
+         style = trend == 1 ? label.style_label_up : label.style_label_down,
+         color = col, textcolor = color.white, size = size.normal)
+
+isWatchShort = trend == -1 and math.abs(close - basis) < atr * 0.6
+isRebound    = trend == 1 and close > close[1] and low < low[1] and close[1] < close[2]
+
+if showLabels and isWatchShort and not isWatchShort[1]
+    label.new(bar_index, high, "观望空",
+         style=label.style_label_down,
+         color=#E040FB,
+         textcolor=color.white,
+         size=size.small)
+
+if showLabels and isRebound
+    label.new(bar_index, low, "反弹",
+         style=label.style_label_up,
+         color=#00BCD4,
+         textcolor=color.white,
+         size=size.small)

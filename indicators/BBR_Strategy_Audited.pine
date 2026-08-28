@@ -1,0 +1,379 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════
+// Breaker Block Reversal Strategy [审计版]
+// 基于 forexobroker 开源指标改写，保留 100% 核心逻辑
+// 新增：自动止损止盈、仓位管理、持仓可视化、Dashboard 盈亏统计
+// ═══════════════════════════════════════════════════════════════════════
+strategy("Breaker Block Reversal Strategy [审计版]",
+     shorttitle="BBR Strategy",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=1,
+     process_orders_on_close=true,
+     max_bars_back=500,
+     max_lines_count=500,
+     max_boxes_count=500,
+     max_labels_count=500,
+     max_table_cells=100)
+
+// ═══════════════════════════════════════════════════════════════════════
+// 输入参数 —— 原作者核心参数（完全保留）
+// ═══════════════════════════════════════════════════════════════════════
+string g_calc = "🔧 结构设置"
+string g_sig  = "📡 信号触发"
+string g_filt = "🛡️ 过滤"
+string g_vis  = "👁️ 视觉"
+string g_risk = "💰 风险管理"
+
+int   i_piv     = input.int(5,    "摆动点周期",         minval=2,  maxval=30, group=g_calc, tooltip="Bars each side for swing pivot confirmation. Lower = more frequent structural breaks.")
+int   i_obLook  = input.int(20,   "OB 搜索回溯",        minval=2,  maxval=50, group=g_calc, tooltip="Bars scanned back to locate the origin candle.")
+float i_impAtr  = input.float(0.5,"最小冲击力度(x ATR)", minval=0.0, maxval=5.0, step=0.1, group=g_calc, tooltip="Required distance (in ATR) from OB origin to current close on the break. 0 disables the filter.")
+int   i_atrLen  = input.int(14,   "ATR 周期",           minval=5,  maxval=50, group=g_calc)
+float i_retBuf  = input.float(0.25,"回踩容差(x ATR)",   minval=0.0, maxval=2.0, step=0.05, group=g_calc, tooltip="Tolerance added around the breaker on retest.")
+int   i_maxAge  = input.int(120,  "Breaker 最大有效期(K线数)", minval=10, maxval=500, group=g_calc, tooltip="Stale breakers/bias are cleared after this many bars without a signal, so the engine can re-arm on fresh structure.")
+bool  i_clsBrk  = input.bool(true,"收盘确认翻转", group=g_calc, tooltip="On = polarity flips only when CLOSE passes through. Off = wick-touch flip (more aggressive).")
+
+string i_trig   = input.string("Either (Recommended)", "信号触发模式", options=["Either (Recommended)", "Retest Only", "EMA Reclaim Only"], group=g_sig, tooltip="Either = fires on whichever happens first — breaker-zone retest OR EMA reclaim during bias.")
+int   i_emaLen  = input.int(9,    "EMA 收复周期",       minval=2,  maxval=50, group=g_sig, tooltip="After a breaker flips, a close-cross of this EMA in the breaker direction times the entry.")
+int   i_cooldown= input.int(10,   "冷却期(K线数)",      minval=1,  maxval=200, group=g_sig)
+
+bool  i_useSess = input.bool(false,"限制交易时段", group=g_filt)
+string i_sess   = input.session("0000-2400","交易时段窗口", group=g_filt)
+
+bool  i_showBox = input.bool(true,"显示 Breaker 区域",   group=g_vis)
+bool  i_showTable=input.bool(true,"显示 Dashboard",       group=g_vis)
+bool  i_showGlow= input.bool(true,"显示信号光晕",         group=g_vis)
+color i_buyColor= input.color(#00c2a8,"做多颜色",         group=g_vis)
+color i_sellColor=input.color(#ff5d6c,"做空颜色",         group=g_vis)
+color i_dashBg  = input.color(color.new(#0a0820, 16),"Dashboard 背景", group=g_vis)
+
+// ═══════════════════════════════════════════════════════════════════════
+// 新增：风险管理参数
+// ═══════════════════════════════════════════════════════════════════════
+string i_slType   = input.string("Breaker外侧+ATR", "止损类型",
+     options=["Breaker外侧+ATR", "固定ATR倍数", "固定点数"], group=g_risk,
+     tooltip="Breaker外侧+ATR = 设在Breaker Block边界外侧+ATR缓冲，最贴合ICT逻辑")
+float i_slAtrMult = input.float(1.0, "ATR 止损倍数", minval=0.1, step=0.1, group=g_risk)
+float i_fixedSl   = input.float(50,  "固定止损点数(最小跳动)", minval=1, group=g_risk)
+
+string i_tpType   = input.string("盈亏比", "止盈类型", options=["盈亏比", "固定点数"], group=g_risk)
+float i_rr        = input.float(2.0, "盈亏比", minval=0.5, step=0.1, group=g_risk)
+float i_fixedTp   = input.float(100, "固定止盈点数(最小跳动)", minval=1, group=g_risk)
+
+bool  i_useTrail  = input.bool(false, "启用移动止损(替代固定止盈)", group=g_risk,
+     tooltip="开启后，固定止盈失效，改用ATR跟踪止损")
+float i_trailAtr  = input.float(2.0, "移动止损 ATR 倍数", minval=0.1, step=0.1, group=g_risk)
+
+float i_qtyPct    = input.float(10,  "开仓权益百分比(%)", minval=1, maxval=100, step=1, group=g_risk)
+
+// ═══════════════════════════════════════════════════════════════════════
+// 原作者核心逻辑 —— 完全保留，不变形
+// ═══════════════════════════════════════════════════════════════════════
+color c_white = #ffffff
+
+float atr  = nz(ta.atr(i_atrLen), 0.0)
+float ph   = ta.pivothigh(high, i_piv, i_piv)
+float pl   = ta.pivotlow(low,   i_piv, i_piv)
+var float lastPH = na
+var float lastPL = na
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
+
+bool downBreak = not na(lastPL) and close < lastPL and close[1] >= lastPL
+bool upBreak   = not na(lastPH) and close > lastPH and close[1] <= lastPH
+bool inSession = not i_useSess or not na(time(timeframe.period, i_sess))
+
+// Breaker Block 状态机
+var float bbTop    = na
+var float bbBot    = na
+var int   bbState  = 0   // 0 none, 1 OB formed (pre-flip), 2 flipped to bull breaker, 3 retested
+var int   bbBorn   = 0
+var float sbTop    = na
+var float sbBot    = na
+var int   sbState  = 0
+var int   sbBorn   = 0
+var int   breakersFlipped = 0
+
+int obLookSafe = math.min(i_obLook, bar_index)
+
+// 看跌 OB 搜索（将翻转为 bullish breaker）
+if downBreak
+    float t = na
+    float b = na
+    if obLookSafe >= 1
+        for k = 1 to obLookSafe
+            if close[k] > open[k] and na(t)
+                t := high[k]
+                b := low[k]
+    if not na(t) and (b - close) >= i_impAtr * atr
+        bbTop := t
+        bbBot := b
+        bbState := 1
+        bbBorn := bar_index
+
+// 看涨 OB 搜索（将翻转为 bearish breaker）
+if upBreak
+    float t = na
+    float b = na
+    if obLookSafe >= 1
+        for k = 1 to obLookSafe
+            if close[k] < open[k] and na(t)
+                t := high[k]
+                b := low[k]
+    if not na(t) and (close - t) >= i_impAtr * atr
+        sbTop := t
+        sbBot := b
+        sbState := 1
+        sbBorn := bar_index
+
+// 过期清理 —— 防止引擎死锁
+if bbState > 0 and (bar_index - bbBorn) > i_maxAge
+    bbState := 0
+    bbTop := na
+    bbBot := na
+if sbState > 0 and (bar_index - sbBorn) > i_maxAge
+    sbState := 0
+    sbTop := na
+    sbBot := na
+
+// 翻转确认
+float brkRef  = i_clsBrk ? close : high
+float brkRefD = i_clsBrk ? close : low
+bool bullFlip = bbState == 1 and not na(bbTop) and brkRef > bbTop
+bool bearFlip = sbState == 1 and not na(sbBot) and brkRefD < sbBot
+
+if bullFlip
+    bbState := 2
+    breakersFlipped += 1
+if bearFlip
+    sbState := 2
+    breakersFlipped += 1
+
+// 回踩检测
+float buf = i_retBuf * atr
+bool bullBrkRetest = bbState == 2 and not na(bbTop) and low <= bbTop + buf and high >= bbBot - buf
+bool bearBrkRetest = sbState == 2 and not na(sbBot) and high >= sbBot - buf and low <= sbTop + buf
+
+if bullBrkRetest
+    bbState := 3
+if bearBrkRetest
+    sbState := 3
+
+// 方向偏好
+var int bias    = 0
+var int biasBar = 0
+if bullFlip
+    bias := 1
+    biasBar := bar_index
+if bearFlip
+    bias := -1
+    biasBar := bar_index
+if bias != 0 and (bar_index - biasBar) > i_maxAge
+    bias := 0
+
+// EMA 收复
+float emaFast = ta.ema(close, i_emaLen)
+bool  crossUp = ta.crossover(close, emaFast)
+bool  crossDn = ta.crossunder(close, emaFast)
+bool emaReclaimUp = bias ==  1 and crossUp
+bool emaReclaimDn = bias == -1 and crossDn
+
+// 信号触发
+bool fireUp   = i_trig == "Retest Only" ? bullBrkRetest : i_trig == "EMA Reclaim Only" ? emaReclaimUp : (bullBrkRetest or emaReclaimUp)
+bool fireDown = i_trig == "Retest Only" ? bearBrkRetest : i_trig == "EMA Reclaim Only" ? emaReclaimDn : (bearBrkRetest or emaReclaimDn)
+bool entryUp   = inSession and fireUp
+bool entryDown = inSession and fireDown
+
+// 冷却与确认
+var int lastSignalBar = -100000
+bool cooldownOk = (bar_index - lastSignalBar) >= i_cooldown
+bool confirmed  = barstate.isconfirmed
+
+bool buySignal  = entryUp   and cooldownOk and confirmed
+bool sellSignal = entryDown and cooldownOk and confirmed and not buySignal
+
+// ═══════════════════════════════════════════════════════════════════════
+// 交易执行 —— 先记录 SL/TP，再清除原作者状态
+// ═══════════════════════════════════════════════════════════════════════
+var float tradeSL     = na
+var float tradeTP     = na
+var bool  tradeIsLong = false
+var float tradeRisk   = na
+
+// 做多
+if buySignal
+    // 计算止损（在清除 bbBot 前读取）
+    float slPrice = i_slType == "Breaker外侧+ATR" ? bbBot - i_slAtrMult * atr :
+                    i_slType == "固定ATR倍数"     ? close - i_slAtrMult * atr :
+                    close - i_fixedSl * syminfo.mintick
+    float riskAmt = close - slPrice
+    float tpPrice = i_tpType == "盈亏比" ? close + i_rr * riskAmt :
+                    close + i_fixedTp * syminfo.mintick
+    tradeSL   := slPrice
+    tradeTP   := tpPrice
+    tradeRisk := riskAmt
+    tradeIsLong := true
+
+    // 消耗原作者状态
+    lastSignalBar := bar_index
+    bias := 0
+    bbState := 0
+    bbTop := na
+    bbBot := na
+
+// 做空
+if sellSignal
+    float slPrice = i_slType == "Breaker外侧+ATR" ? sbTop + i_slAtrMult * atr :
+                    i_slType == "固定ATR倍数"     ? close + i_slAtrMult * atr :
+                    close + i_fixedSl * syminfo.mintick
+    float riskAmt = slPrice - close
+    float tpPrice = i_tpType == "盈亏比" ? close - i_rr * riskAmt :
+                    close - i_fixedTp * syminfo.mintick
+    tradeSL   := slPrice
+    tradeTP   := tpPrice
+    tradeRisk := riskAmt
+    tradeIsLong := false
+
+    lastSignalBar := bar_index
+    bias := 0
+    sbState := 0
+    sbTop := na
+    sbBot := na
+
+// 执行订单（空仓检查，避免加仓）
+if buySignal and strategy.position_size == 0
+    strategy.entry("BBR做多", strategy.long, qty=strategy.equity * i_qtyPct / 100 / close)
+    if i_useTrail
+        int trailTicks = int(math.max(1, i_trailAtr * atr / syminfo.mintick))
+        strategy.exit("移动止盈多", "BBR做多", stop=tradeSL, trail_points=trailTicks)
+    else
+        strategy.exit("止盈止损多", "BBR做多", stop=tradeSL, limit=tradeTP)
+
+if sellSignal and strategy.position_size == 0
+    strategy.entry("BBR做空", strategy.short, qty=strategy.equity * i_qtyPct / 100 / close)
+    if i_useTrail
+        int trailTicks = int(math.max(1, i_trailAtr * atr / syminfo.mintick))
+        strategy.exit("移动止盈空", "BBR做空", stop=tradeSL, trail_points=trailTicks)
+    else
+        strategy.exit("止盈止损空", "BBR做空", stop=tradeSL, limit=tradeTP)
+
+// ═══════════════════════════════════════════════════════════════════════
+// 可视化 —— 保留原作者全部 + 新增持仓线
+// ═══════════════════════════════════════════════════════════════════════
+var box bbBox = na
+var box sbBox = na
+
+if i_showBox and bullFlip and not na(bbTop)
+    box.delete(bbBox)
+    bbBox := box.new(math.max(0, bar_index - i_obLook), bbTop, bar_index + 25, bbBot,
+         border_color=color.new(i_buyColor, 25), bgcolor=color.new(i_buyColor, 82))
+if i_showBox and bearFlip and not na(sbTop)
+    box.delete(sbBox)
+    sbBox := box.new(math.max(0, bar_index - i_obLook), sbTop, bar_index + 25, sbBot,
+         border_color=color.new(i_sellColor, 25), bgcolor=color.new(i_sellColor, 82))
+
+plotshape(i_showGlow and buySignal,  "Buy Glow 1",  shape.diamond, location.belowbar, color.new(i_buyColor, 70), size=size.huge)
+plotshape(i_showGlow and buySignal,  "Buy Glow 2",  shape.diamond, location.belowbar, color.new(i_buyColor, 40), size=size.large)
+plotshape(buySignal,                 "Buy",         shape.diamond, location.belowbar, color.new(i_buyColor, 0),  size=size.normal, text="BBR▲", textcolor=c_white)
+plotshape(i_showGlow and sellSignal, "Sell Glow 1", shape.diamond, location.abovebar, color.new(i_sellColor, 70), size=size.huge)
+plotshape(i_showGlow and sellSignal, "Sell Glow 2", shape.diamond, location.abovebar, color.new(i_sellColor, 40), size=size.large)
+plotshape(sellSignal,                "Sell",        shape.diamond, location.abovebar, color.new(i_sellColor, 0),  size=size.normal, text="BBR▼", textcolor=c_white)
+
+barcolor(buySignal ? i_buyColor : sellSignal ? i_sellColor : na)
+bgcolor(bias == 1 ? color.new(i_buyColor, 94) : bias == -1 ? color.new(i_sellColor, 94) : na)
+
+// EMA 线
+plot(emaFast, "EMA", color=color.new(color.orange, 0), linewidth=1)
+
+// 持仓线（仅在有持仓时显示）
+bool inLong  = strategy.position_size > 0
+bool inShort = strategy.position_size < 0
+float posAvg = strategy.position_avg_price
+
+plot(inLong  ? posAvg : na, "入场价", color=color.blue, style=plot.style_linebr, linewidth=1)
+plot(inLong  ? tradeSL  : na, "止损",   color=color.red,  style=plot.style_linebr, linewidth=1)
+plot(inLong  ? tradeTP  : na, "止盈",   color=color.green,style=plot.style_linebr, linewidth=1)
+plot(inShort ? posAvg : na, "入场价", color=color.blue, style=plot.style_linebr, linewidth=1)
+plot(inShort ? tradeSL  : na, "止损",   color=color.red,  style=plot.style_linebr, linewidth=1)
+plot(inShort ? tradeTP  : na, "止盈",   color=color.green,style=plot.style_linebr, linewidth=1)
+
+// 持仓背景
+bgcolor(inLong ? color.new(i_buyColor, 95) : inShort ? color.new(i_sellColor, 95) : na, title="持仓背景")
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dashboard —— 原作者 + 新增持仓盈亏统计
+// ═══════════════════════════════════════════════════════════════════════
+if i_showTable and barstate.islast
+    var table dash = table.new(position.top_right, 2, 12, bgcolor=i_dashBg,
+         border_color=color.new(i_buyColor, 55), border_width=2)
+
+    string st = bbState == 2 ? "BULL BREAKER" : sbState == 2 ? "BEAR BREAKER" :
+                bias == 1 ? "BULL BIAS" : bias == -1 ? "BEAR BIAS" : "WAITING FLIP"
+    color  sc = bbState == 2 or bias == 1 ? i_buyColor : sbState == 2 or bias == -1 ? i_sellColor : color.gray
+
+    table.cell(dash, 0, 0, "Breaker Block Reversal", text_color=i_buyColor, text_size=size.normal, text_halign=text.align_left)
+    table.cell(dash, 1, 0, "[Strategy]", text_color=color.new(i_buyColor, 50), text_size=size.tiny)
+
+    table.cell(dash, 0, 1, "阶段", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 1, st, text_color=sc, text_size=size.small)
+
+    table.cell(dash, 0, 2, "Bull Breaker", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 2, na(bbTop) ? "-" : str.tostring(bbBot, "#.##") + " ~ " + str.tostring(bbTop, "#.##"), text_color=i_buyColor, text_size=size.small)
+
+    table.cell(dash, 0, 3, "Bear Breaker", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 3, na(sbTop) ? "-" : str.tostring(sbBot, "#.##") + " ~ " + str.tostring(sbTop, "#.##"), text_color=i_sellColor, text_size=size.small)
+
+    table.cell(dash, 0, 4, "翻转次数", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 4, str.tostring(breakersFlipped), text_color=c_white, text_size=size.small)
+
+    table.cell(dash, 0, 5, "ATR", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 5, str.tostring(atr, "#.#####"), text_color=color.silver, text_size=size.small)
+
+    // 新增：持仓统计
+    table.cell(dash, 0, 6, "持仓方向", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    string posDir = inLong ? "🟢 LONG" : inShort ? "🔴 SHORT" : "⚪ FLAT"
+    table.cell(dash, 1, 6, posDir, text_color=inLong ? i_buyColor : inShort ? i_sellColor : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 7, "持仓盈亏", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    float pnl = strategy.openprofit
+    table.cell(dash, 1, 7, str.tostring(pnl, "#.##") + " (" + str.tostring(pnl / strategy.equity * 100, "#.##") + "%)",
+         text_color=pnl > 0 ? i_buyColor : pnl < 0 ? i_sellColor : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 8, "止损距离", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    float slDist = inLong ? posAvg - tradeSL : inShort ? tradeSL - posAvg : na
+    table.cell(dash, 1, 8, na(slDist) ? "-" : str.tostring(slDist, "#.##"), text_color=color.red, text_size=size.small)
+
+    table.cell(dash, 0, 9, "止盈距离", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    float tpDist = inLong ? tradeTP - posAvg : inShort ? posAvg - tradeTP : na
+    table.cell(dash, 1, 9, na(tpDist) ? "-" : str.tostring(tpDist, "#.##"), text_color=color.green, text_size=size.small)
+
+    table.cell(dash, 0, 10, "盈亏比", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 10, na(tpDist) or na(slDist) or slDist == 0 ? "-" : str.tostring(tpDist / slDist, "#.##") + ":1", text_color=color.yellow, text_size=size.small)
+
+    table.cell(dash, 0, 11, "冷却期", text_color=color.silver, text_size=size.small, text_halign=text.align_left)
+    int cd = bar_index - lastSignalBar
+    table.cell(dash, 1, 11, str.tostring(cd) + "/" + str.tostring(i_cooldown), text_color=cd >= i_cooldown ? color.green : color.red, text_size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════
+// 警报 —— 保留原作者全部 + 新增策略事件
+// ═══════════════════════════════════════════════════════════════════════
+if buySignal
+    alert('{"action":"BUY","indicator":"BBR-Strategy","ticker":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(tradeSL) + ',"tp":' + str.tostring(tradeTP) + '}', alert.freq_once_per_bar_close)
+if sellSignal
+    alert('{"action":"SELL","indicator":"BBR-Strategy","ticker":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(tradeSL) + ',"tp":' + str.tostring(tradeTP) + '}', alert.freq_once_per_bar_close)
+
+alertcondition(buySignal,                          "🟢 BBR 做多",       "Bull breaker retest on {{ticker}} {{interval}} at {{close}}")
+alertcondition(sellSignal,                         "🔴 BBR 做空",       "Bear breaker retest on {{ticker}} {{interval}} at {{close}}")
+alertcondition(buySignal or sellSignal,            "📢 BBR 任何信号",    "Any BBR signal on {{ticker}} {{interval}}")
+alertcondition(downBreak,                          "📉 结构下破",       "Down structural break on {{ticker}} {{interval}}")
+alertcondition(upBreak,                            "📈 结构上攻",       "Up structural break on {{ticker}} {{interval}}")
+alertcondition(bullFlip,                           "🟢 Bull Flip",      "Bear OB flipped to bull breaker on {{ticker}} {{interval}}")
+alertcondition(bearFlip,                           "🔴 Bear Flip",      "Bull OB flipped to bear breaker on {{ticker}} {{interval}}")
+alertcondition(bullBrkRetest,                      "🟢 Bull Retest",    "Bull breaker touched on {{ticker}} {{interval}}")
+alertcondition(bearBrkRetest,                      "🔴 Bear Retest",    "Bear breaker touched on {{ticker}} {{interval}}")

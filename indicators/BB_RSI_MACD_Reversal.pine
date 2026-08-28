@@ -1,0 +1,48 @@
+//@version=5
+strategy("BB+RSI+MACD 反转策略", overlay=true, initial_capital=10000)
+
+// === 输入参数 ===
+bbLen      = input.int(20, "布林带周期")
+bbMult     = input.float(2.0, "布林带标准差")
+rsiLen     = input.int(14, "RSI周期")
+macdFast   = input.int(12, "MACD快线")
+macdSlow   = input.int(26, "MACD慢线")
+macdSig    = input.int(9, "MACD信号线")
+
+// === 指标计算 ===
+basis = ta.sma(close, bbLen)
+dev   = bbMult * ta.stdev(close, bbLen)
+upper = basis + dev
+lower = basis - dev
+
+rsi   = ta.rsi(close, rsiLen)
+[macdLine, signalLine, _] = ta.macd(close, macdFast, macdSlow, macdSig)
+
+// === 反转条件 ===
+// 底部反转做多：价格触及下轨 + RSI超卖 + MACD金叉
+longCond  = close < lower and rsi < 35 and ta.crossover(macdLine, signalLine)
+
+// 顶部反转做空：价格触及上轨 + RSI超买 + MACD死叉
+shortCond = close > upper and rsi > 65 and ta.crossunder(macdLine, signalLine)
+
+// === 入场 ===
+if longCond
+    strategy.entry("做多", strategy.long)
+if shortCond
+    strategy.entry("做空", strategy.short)
+
+// === 止损止盈（1:2 盈亏比）===
+strategy.exit("止盈止损多", "做多", stop=close*0.98, limit=close*1.04)
+strategy.exit("止盈止损空", "做空", stop=close*1.02, limit=close*0.96)
+
+// === 可视化 ===
+plot(upper, "上轨", color=color.red)
+plot(lower, "下轨", color=color.green)
+plot(basis, "中轨", color=color.orange)
+
+plotshape(longCond,  "底部反转", location.belowbar, color.green, shape.triangleup, size=size.normal)
+plotshape(shortCond, "顶部反转", location.abovebar, color.red, shape.triangledown, size=size.normal)
+
+// === 警报 ===
+alertcondition(longCond,  "🟢 底部反转做多", "4H 出现底部反转信号，建议关注做多机会")
+alertcondition(shortCond, "🔴 顶部反转做空", "4H 出现顶部反转信号，建议关注做空机会")

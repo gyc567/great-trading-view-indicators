@@ -1,0 +1,355 @@
+//@version=5
+strategy("Breaker Block Reversal Strategy [完整回测版]", 
+     overlay=true, 
+     initial_capital=10000, 
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=10,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=1,
+     max_lines_count=500,
+     max_boxes_count=500,
+     max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════
+// 输入参数
+// ═══════════════════════════════════════════════════════
+// 结构设置
+pivotLen      = input.int(5, "摆动点周期", minval=1, group="🔧 结构设置")
+minImpulse    = input.float(0.5, "最小冲击力度(x ATR)", minval=0.1, step=0.1, group="🔧 结构设置")
+maxLookback   = input.int(20, "最大回溯K线数", minval=5, group="🔧 结构设置")
+zoneExpiry    = input.int(120, "区域有效期(K线数)", minval=20, group="🔧 结构设置")
+
+// 信号触发
+triggerMode   = input.string("Retest", "触发模式", options=["Retest", "EMA Reclaim", "Either"], group="📡 信号触发")
+emaPeriod     = input.int(9, "EMA周期", minval=1, group="📡 信号触发")
+retestTol     = input.float(0.25, "回踩容差(x ATR)", minval=0.0, step=0.05, group="📡 信号触发")
+
+// 过滤
+useRSI        = input.bool(true, "启用RSI过滤", group="🛡️ 过滤")
+rsiLen        = input.int(14, "RSI周期", minval=1, group="🛡️ 过滤")
+rsiLongMax    = input.int(60, "做多RSI上限", minval=30, maxval=100, group="🛡️ 过滤")
+rsiShortMin   = input.int(40, "做空RSI下限", minval=0, maxval=70, group="🛡️ 过滤")
+cooldown      = input.int(10, "信号冷却期(K线数)", minval=1, group="🛡️ 过滤")
+
+// 风险管理
+slType        = input.string("Breaker外侧+ATR", "止损类型", options=["Breaker外侧+ATR", "固定ATR倍数", "固定点数"], group="💰 风险管理")
+slAtrMult     = input.float(1.0, "ATR止损倍数", minval=0.1, step=0.1, group="💰 风险管理")
+fixedSl       = input.float(50, "固定止损点数(最小跳动)", minval=1, group="💰 风险管理")
+
+tpType        = input.string("盈亏比", "止盈类型", options=["盈亏比", "固定点数"], group="💰 风险管理")
+riskReward    = input.float(2.0, "盈亏比", minval=0.5, step=0.1, group="💰 风险管理")
+fixedTp       = input.float(100, "固定止盈点数(最小跳动)", minval=1, group="💰 风险管理")
+
+useTrailing   = input.bool(false, "启用移动止损(替代固定止盈)", group="💰 风险管理")
+trailAtrMult  = input.float(2.0, "移动止损ATR倍数", minval=0.1, step=0.1, group="💰 风险管理")
+
+// ═══════════════════════════════════════════════════════
+// 指标计算
+// ═══════════════════════════════════════════════════════
+atr = ta.atr(14)
+ema = ta.ema(close, emaPeriod)
+rsi = ta.rsi(close, rsiLen)
+
+// ═══════════════════════════════════════════════════════
+// 摆动点检测
+// ═══════════════════════════════════════════════════════
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+// ═══════════════════════════════════════════════════════
+// Breaker Block 数据结构
+// ═══════════════════════════════════════════════════════
+var float[] bull_top    = array.new_float(0)
+var float[] bull_bot    = array.new_float(0)
+var int[]   bull_bar    = array.new_int(0)
+var float[] bull_sl     = array.new_float(0)
+var float[] bull_tp     = array.new_float(0)
+
+var float[] bear_top    = array.new_float(0)
+var float[] bear_bot    = array.new_float(0)
+var int[]   bear_bar    = array.new_int(0)
+var float[] bear_sl     = array.new_float(0)
+var float[] bear_tp     = array.new_float(0)
+
+var box[]   bullBoxes   = array.new_box(0)
+var box[]   bearBoxes   = array.new_box(0)
+
+// ═══════════════════════════════════════════════════════
+// 状态跟踪
+// ═══════════════════════════════════════════════════════
+var float lastPH        = na
+var float lastPL        = na
+var int   lastPH_bar    = na
+var int   lastPL_bar    = na
+var int   lastSignalBar = -9999
+
+if not na(ph)
+    lastPH     := ph
+    lastPH_bar := bar_index[pivotLen]
+if not na(pl)
+    lastPL     := pl
+    lastPL_bar := bar_index[pivotLen]
+
+// ═══════════════════════════════════════════════════════
+// 辅助函数
+// ═══════════════════════════════════════════════════════
+findBreakerBar_bull(maxBars) =>
+    int idx = 0
+    for i = 1 to maxBars
+        if close[i] < open[i]
+            idx := i
+            break
+    idx
+
+findBreakerBar_bear(maxBars) =>
+    int idx = 0
+    for i = 1 to maxBars
+        if close[i] > open[i]
+            idx := i
+            break
+    idx
+
+// ═══════════════════════════════════════════════════════
+// 识别 BOS 并创建 Breaker Block
+// ═══════════════════════════════════════════════════════
+// 看涨Breaker: 突破前高，突破前最后一根看跌K线
+breakBull = not na(lastPH) and close > lastPH and close[1] <= lastPH
+
+if breakBull
+    idx = findBreakerBar_bull(math.min(maxLookback, bar_index - lastPH_bar + 5))
+    if idx > 0
+        impulse = (close - low[idx]) / atr
+        if impulse >= minImpulse
+            bbTop = high[idx]
+            bbBot = low[idx]
+
+            slPrice = slType == "Breaker外侧+ATR" ? bbBot - slAtrMult * atr :
+                      slType == "固定ATR倍数" ? close - slAtrMult * atr :
+                      close - fixedSl * syminfo.mintick
+
+            risk = close - slPrice
+            tpPrice = tpType == "盈亏比" ? close + riskReward * risk :
+                      close + fixedTp * syminfo.mintick
+
+            array.push(bull_top, bbTop)
+            array.push(bull_bot, bbBot)
+            array.push(bull_bar, bar_index)
+            array.push(bull_sl, slPrice)
+            array.push(bull_tp, tpPrice)
+
+            if array.size(bullBoxes) > 10
+                box.delete(array.shift(bullBoxes))
+            b = box.new(bar_index - idx, bbTop, bar_index, bbBot, 
+                 bgcolor=color.new(color.teal, 85), 
+                 border_color=color.new(color.teal, 60),
+                 border_width=1)
+            array.push(bullBoxes, b)
+
+// 看跌Breaker: 跌破前低，突破前最后一根看涨K线
+breakBear = not na(lastPL) and close < lastPL and close[1] >= lastPL
+
+if breakBear
+    idx = findBreakerBar_bear(math.min(maxLookback, bar_index - lastPL_bar + 5))
+    if idx > 0
+        impulse = (high[idx] - close) / atr
+        if impulse >= minImpulse
+            bbTop = high[idx]
+            bbBot = low[idx]
+
+            slPrice = slType == "Breaker外侧+ATR" ? bbTop + slAtrMult * atr :
+                      slType == "固定ATR倍数" ? close + slAtrMult * atr :
+                      close + fixedSl * syminfo.mintick
+
+            risk = slPrice - close
+            tpPrice = tpType == "盈亏比" ? close - riskReward * risk :
+                      close - fixedTp * syminfo.mintick
+
+            array.push(bear_top, bbTop)
+            array.push(bear_bot, bbBot)
+            array.push(bear_bar, bar_index)
+            array.push(bear_sl, slPrice)
+            array.push(bear_tp, tpPrice)
+
+            if array.size(bearBoxes) > 10
+                box.delete(array.shift(bearBoxes))
+            b = box.new(bar_index - idx, bbTop, bar_index, bbBot,
+                 bgcolor=color.new(color.maroon, 85),
+                 border_color=color.new(color.maroon, 60),
+                 border_width=1)
+            array.push(bearBoxes, b)
+
+// ═══════════════════════════════════════════════════════
+// 清理过期 Breaker Block
+// ═══════════════════════════════════════════════════════
+cleanBull() =>
+    int i = 0
+    while i < array.size(bull_bar)
+        if bar_index - array.get(bull_bar, i) > zoneExpiry
+            array.remove(bull_top, i)
+            array.remove(bull_bot, i)
+            array.remove(bull_bar, i)
+            array.remove(bull_sl, i)
+            array.remove(bull_tp, i)
+        else
+            i += 1
+
+cleanBear() =>
+    int i = 0
+    while i < array.size(bear_bar)
+        if bar_index - array.get(bear_bar, i) > zoneExpiry
+            array.remove(bear_top, i)
+            array.remove(bear_bot, i)
+            array.remove(bear_bar, i)
+            array.remove(bear_sl, i)
+            array.remove(bear_tp, i)
+        else
+            i += 1
+
+cleanBull()
+cleanBear()
+
+// ═══════════════════════════════════════════════════════
+// 检测回踩/收复信号
+// ═══════════════════════════════════════════════════════
+bool longSignal  = false
+bool shortSignal = false
+float longSL     = na
+float longTP     = na
+float shortSL    = na
+float shortTP    = na
+
+bool cooldownOk = bar_index - lastSignalBar >= cooldown
+bool rsiLongOk  = not useRSI or rsi < rsiLongMax
+bool rsiShortOk = not useRSI or rsi > rsiShortMin
+bool noPosition = strategy.position_size == 0
+
+// 做多信号检测
+if cooldownOk and rsiLongOk and noPosition
+    for i = 0 to array.size(bull_top) - 1
+        bbTop = array.get(bull_top, i)
+        bbBot = array.get(bull_bot, i)
+        tol = retestTol * atr
+
+        bool inZone = low <= bbTop + tol and high >= bbBot - tol
+        bool emaOk  = triggerMode == "Retest" ? true :
+                      triggerMode == "EMA Reclaim" ? close > ema :
+                      close > ema or inZone
+
+        if inZone and emaOk
+            longSignal := true
+            longSL := array.get(bull_sl, i)
+            longTP := array.get(bull_tp, i)
+
+            array.remove(bull_top, i)
+            array.remove(bull_bot, i)
+            array.remove(bull_bar, i)
+            array.remove(bull_sl, i)
+            array.remove(bull_tp, i)
+            break
+
+// 做空信号检测
+if cooldownOk and rsiShortOk and noPosition
+    for i = 0 to array.size(bear_top) - 1
+        bbTop = array.get(bear_top, i)
+        bbBot = array.get(bear_bot, i)
+        tol = retestTol * atr
+
+        bool inZone = low <= bbTop + tol and high >= bbBot - tol
+        bool emaOk  = triggerMode == "Retest" ? true :
+                      triggerMode == "EMA Reclaim" ? close < ema :
+                      close < ema or inZone
+
+        if inZone and emaOk
+            shortSignal := true
+            shortSL := array.get(bear_sl, i)
+            shortTP := array.get(bear_tp, i)
+
+            array.remove(bear_top, i)
+            array.remove(bear_bot, i)
+            array.remove(bear_bar, i)
+            array.remove(bear_sl, i)
+            array.remove(bear_tp, i)
+            break
+
+// ═══════════════════════════════════════════════════════
+// 执行交易
+// ═══════════════════════════════════════════════════════
+if longSignal
+    lastSignalBar := bar_index
+    strategy.entry("BBR做多", strategy.long)
+    if useTrailing
+        strategy.exit("移动止盈多", "BBR做多", stop=longSL, 
+             trail_points=int(trailAtrMult * atr / syminfo.mintick), 
+             trail_offset=int(trailAtrMult * atr / syminfo.mintick * 0.5))
+    else
+        strategy.exit("止盈止损多", "BBR做多", stop=longSL, limit=longTP)
+
+if shortSignal
+    lastSignalBar := bar_index
+    strategy.entry("BBR做空", strategy.short)
+    if useTrailing
+        strategy.exit("移动止盈空", "BBR做空", stop=shortSL, 
+             trail_points=int(trailAtrMult * atr / syminfo.mintick), 
+             trail_offset=int(trailAtrMult * atr / syminfo.mintick * 0.5))
+    else
+        strategy.exit("止盈止损空", "BBR做空", stop=shortSL, limit=shortTP)
+
+// ═══════════════════════════════════════════════════════
+// 可视化
+// ═══════════════════════════════════════════════════════
+plot(ema, "EMA", color=color.new(color.orange, 0), linewidth=1)
+
+plotshape(longSignal,  "BBR做多", location=location.belowbar, color=color.new(color.green, 0), style=shape.labelup,   size=size.normal, text="🟢BBR", textcolor=color.white)
+plotshape(shortSignal, "BBR做空", location=location.abovebar, color=color.new(color.red, 0),   style=shape.labeldown, size=size.normal, text="🔴BBR", textcolor=color.white)
+
+// 持仓线
+plot(strategy.position_size > 0 ? strategy.position_avg_price : na, "入场价多", color=color.blue, style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size > 0 ? longSL : na, "止损多", color=color.red, style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size > 0 ? longTP : na, "止盈多", color=color.green, style=plot.style_linebr, linewidth=1)
+
+plot(strategy.position_size < 0 ? strategy.position_avg_price : na, "入场价空", color=color.blue, style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size < 0 ? shortSL : na, "止损空", color=color.red, style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size < 0 ? shortTP : na, "止盈空", color=color.green, style=plot.style_linebr, linewidth=1)
+
+bgcolor(strategy.position_size > 0 ? color.new(color.green, 95) : strategy.position_size < 0 ? color.new(color.red, 95) : na, title="持仓背景")
+
+// ═══════════════════════════════════════════════════════
+// Dashboard
+// ═══════════════════════════════════════════════════════
+var table dash = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 20), frame_width=1, frame_color=color.gray)
+
+if barstate.islast
+    table.cell(dash, 0, 0, "阶段", text_color=color.white, text_size=size.small)
+    phase = array.size(bull_top) > 0 ? "🟢 BULL BIAS" : array.size(bear_top) > 0 ? "🔴 BEAR BIAS" : "⚪ WAITING"
+    table.cell(dash, 1, 0, phase, text_color=array.size(bull_top) > 0 ? color.green : array.size(bear_top) > 0 ? color.red : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 1, "活跃Bull BB", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(array.size(bull_top)), text_color=color.teal, text_size=size.small)
+
+    table.cell(dash, 0, 2, "活跃Bear BB", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(array.size(bear_top)), text_color=color.maroon, text_size=size.small)
+
+    table.cell(dash, 0, 3, "RSI", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(rsi, "#.#"), text_color=rsi > 70 ? color.red : rsi < 30 ? color.green : color.white, text_size=size.small)
+
+    table.cell(dash, 0, 4, "ATR", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 4, str.tostring(atr, "#.##"), text_color=color.white, text_size=size.small)
+
+    table.cell(dash, 0, 5, "持仓方向", text_color=color.white, text_size=size.small)
+    pos = strategy.position_size > 0 ? "🟢 做多" : strategy.position_size < 0 ? "🔴 做空" : "无"
+    table.cell(dash, 1, 5, pos, text_color=strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 6, "盈亏比", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 6, str.tostring(riskReward, "#.#") + ":1", text_color=color.yellow, text_size=size.small)
+
+    table.cell(dash, 0, 7, "冷却期", text_color=color.white, text_size=size.small)
+    cd = bar_index - lastSignalBar
+    table.cell(dash, 1, 7, str.tostring(cd) + "/" + str.tostring(cooldown), text_color=cd >= cooldown ? color.green : color.red, text_size=size.small)
+
+// ═══════════════════════════════════════════════════════
+// 警报
+// ═══════════════════════════════════════════════════════
+alertcondition(longSignal,  "🟢 BBR 底部反转做多", "Breaker Block 回踩做多信号触发！建议关注做多机会。")
+alertcondition(shortSignal, "🔴 BBR 顶部反转做空", "Breaker Block 回踩做空信号触发！建议关注做空机会。")
+alertcondition(longSignal or shortSignal, "📢 BBR 任何信号", "Breaker Block 出现交易信号，请查看图表！")
