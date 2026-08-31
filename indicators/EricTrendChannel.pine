@@ -1,68 +1,1118 @@
 //@version=6
-indicator("百万Eric风格 趋势通道（主图专用）", overlay=true, max_labels_count=500)
+indicator("百万Eric风格 趋势通道 v29", overlay = true, max_labels_count = 500, max_lines_count = 300)
 
-// ========== 参数 ==========
-len         = input.int(50, "通道基础长度", group="趋势通道")
-atrLen      = input.int(14, "ATR长度", group="趋势通道")
-atrMult     = input.float(1.8, "通道宽度倍数", step=0.1, group="趋势通道")
-smooth      = input.int(3, "通道平滑", group="趋势通道")
-showLabels  = input.bool(true, "显示趋势标签", group="显示")
-showChannel = input.bool(true, "显示趋势通道", group="显示")
-lineWidth   = input.int(3, "通道线宽", minval=1, maxval=5, group="显示")
+ema20Len  = input.int(20, "EMA20", group = "均线")
+ema50Len  = input.int(50, "EMA50", group = "均线")
+ema100Len = input.int(100, "EMA100", group = "均线")
+ema200Len = input.int(200, "EMA200", group = "均线")
+atrLen    = input.int(14, "ATR长度", group = "通道")
+atrMult   = input.float(1.8, "通道宽度倍数", step = 0.1, group = "通道")
+smooth    = input.int(3, "通道平滑", group = "通道")
 
-// ========== 计算 ==========
-basis = ta.ema(close, len)
-atr   = ta.atr(atrLen)
+swingLook     = input.int(20, "摆动流动性回看", minval = 5, group = "扫流动性")
+pivotLen      = input.int(5, "枢轴确认长度", minval = 2, group = "扫流动性")
+eqTolAtr      = input.float(0.15, "相等高低容差ATR", step = 0.05, group = "扫流动性")
+usePrevDay    = input.bool(true, "把昨高低当流动性池", group = "扫流动性")
+useSwingPool  = input.bool(true, "把近期摆动当流动性池", group = "扫流动性")
+usePivotPool  = input.bool(true, "把确认枢轴当流动性池", group = "扫流动性")
+minWickPct    = input.float(0.35, "1H影线占比", step = 0.05, group = "扫流动性")
+minWickHtf    = input.float(0.22, "4H及以上影线占比", step = 0.01, group = "扫流动性")
+slPadAtr      = input.float(0.05, "止损在扫到极值外的ATR", step = 0.01, group = "精确入场")
+maxEntryPct   = input.float(0.15, "入场距止损最大%", step = 0.01, group = "精确入场")
+maxRiskPct    = input.float(0.8, "趋势单最大止损%", step = 0.1, group = "精确入场")
+boxRiskPct    = input.float(1.5, "箱体单最大止损 低频", step = 0.1, group = "箱体")
+boxRiskHtf    = input.float(2.5, "箱体单最大止损 4H", step = 0.1, group = "箱体")
+fadeRiskPct   = input.float(2.0, "失败空最大止损%", step = 0.1, group = "失败突破")
+minRiskAtr    = input.float(0.04, "最小止损ATR", step = 0.01, group = "精确入场")
+useFib        = input.bool(true, "用Fib校正三价", group = "斐波那契")
+fibOte        = input.float(0.618, "回踩入场回撤比", step = 0.001, group = "斐波那契")
+fibTpMain     = input.float(1.618, "主止盈扩展比", step = 0.001, group = "斐波那契")
+fibTpExt      = input.float(2.618, "顺势止盈扩展比", step = 0.001, group = "斐波那契")
+useTrailEma   = input.bool(true, "浮盈后EMA20跟踪止损", group = "止盈")
+trailAfterR   = input.float(1.5, "开始跟踪的R", step = 0.1, group = "止盈")
+cooldownTrend = input.int(12, "回踩冷却", minval = 1, group = "顺势")
+maxHoldBars   = input.int(120, "最大持仓K线", minval = 10, group = "顺势")
+onePerWave    = input.bool(true, "一波趋势回踩只做一单", group = "顺势")
+useBe         = input.bool(true, "浮盈1R后止损移到保本", group = "顺势")
+rsiResetLong  = input.float(50, "多单RSI收回线", group = "顺势")
+rsiResetShort = input.float(50, "空单RSI收回线", group = "顺势")
+rsiDipLong    = input.float(48, "多单回踩RSI上限", group = "顺势")
+rsiDipShort   = input.float(52, "空单回抽RSI下限", group = "顺势")
+rsiSpringMax  = input.float(45, "弹簧前RSI低点上限", group = "RSI")
+rsiBreakMin   = input.float(50, "箱破RSI下限", group = "RSI")
+rsiHot        = input.float(70, "高位禁多RSI", group = "RSI")
+rsiFadeMin    = input.float(68, "失败空RSI下限", group = "RSI")
 
-upper = basis + atr * atrMult
-lower = basis - atr * atrMult
+useIgnition     = input.bool(true, "启用盘整启动", group = "启动突破")
+baseBars        = input.int(20, "平台回看", minval = 8, group = "启动突破")
+compressAtr     = input.float(2.2, "均线缠绕ATR倍数", step = 0.1, group = "启动突破")
+ignitionWait    = input.int(12, "启动后回踩等待K线", minval = 3, group = "启动突破")
+ignitionCool    = input.int(20, "启动冷却", minval = 5, group = "启动突破")
 
-u = ta.sma(upper, smooth)
-l = ta.sma(lower, smooth)
+useBox          = input.bool(true, "启用箱体弹簧突破", group = "箱体")
+boxBars         = input.int(24, "箱体回看低频", minval = 8, group = "箱体")
+boxBarsHtf      = input.int(16, "箱体回看4H", minval = 8, group = "箱体")
+boxMaxAtr       = input.float(4.0, "箱高最大ATR", step = 0.1, group = "箱体")
+boxMinAtr       = input.float(0.45, "箱高最小ATR", step = 0.05, group = "箱体")
+boxLife         = input.int(36, "扫底后有效K线", minval = 6, group = "箱体")
+springConfirm   = input.int(2, "弹簧确认窗", minval = 1, maxval = 3, group = "箱体")
+mergeBars       = input.int(8, "同波合并K线数", minval = 2, group = "箱体")
+showBox         = input.bool(true, "画出当前箱体", group = "箱体")
+blockSpringDown = input.bool(true, "强空头禁止弹簧多", group = "箱体")
 
-trend = close > basis ? 1 : close < basis ? -1 : 0
+useFadeHigh      = input.bool(true, "新高失败做空", group = "失败突破")
+useFadeLow       = input.bool(true, "新低失败做多", group = "失败突破")
+hhLookback       = input.int(80, "新高新低回看", minval = 20, group = "失败突破")
+fadeCool         = input.int(16, "失败单冷却", minval = 1, group = "失败突破")
+requireDiv       = input.bool(true, "要求RSI背离", group = "失败突破")
+requireTurn      = input.bool(true, "要求RSI拐头", group = "失败突破")
+blockStrongTrend = input.bool(true, "无高潮时强趋势禁止失败单", group = "失败突破")
+strongAdx        = input.float(25, "强趋势ADX", group = "失败突破")
+requireBackIn    = input.bool(true, "收盘收回EMA20内侧", group = "失败突破")
 
-// ========== 清晰趋势通道 ==========
-plot_u = plot(showChannel ? u : na, "上轨",
-     color = trend == 1 ? #00E676 : #FF5252,
-     linewidth=lineWidth)
+rsiLen = input.int(14, "RSI长度", group = "过滤")
+adxLen = input.int(14, "ADX长度", group = "过滤")
+dispMode      = input.string("标准", "显示档位", options = ["简洁", "标准", "完整"], group = "显示")
+panelPosStr   = input.string("左上", "信息板位置", options = ["左上", "右上", "左下", "右下"], group = "显示")
+showEMAs      = input.bool(true, "显示EMA", group = "显示")
+showEmaTags   = input.bool(true, "EMA线末端标注名称", group = "显示")
+showChannel   = input.bool(true, "显示通道", group = "显示")
+showRiskBox   = input.bool(true, "显示风险框", group = "显示")
+keepHistEntry = input.bool(true, "保留历史开单时间", group = "显示")
+histKeep      = input.int(5, "历史时间标签数量", minval = 1, maxval = 20, group = "显示")
+lineWidth     = input.int(2, "通道线宽", minval = 1, maxval = 5, group = "显示")
 
-plot_l = plot(showChannel ? l : na, "下轨",
-     color = trend == 1 ? #00E676 : #FF5252,
-     linewidth=lineWidth)
+colEma20 = #9C27B0
+colEma50 = #FF9800
+colEma100 = #2196F3
+colEma200 = #E91E63
+colPull  = #80DEEA
 
-fill(plot_u, plot_l,
-     color = trend == 1 ? color.new(#00E676, 75) :
-             trend == -1 ? color.new(#FF5252, 75) :
-             color.new(color.gray, 90),
-     title="趋势通道填充")
+isSimple = dispMode == "简洁"
+isFull = dispMode == "完整"
+useEmaTagsNow = showEMAs and showEmaTags and not isSimple
+useBarTime = not isSimple
+useSlTpLabs = isFull
+useRiskBoxNow = showRiskBox and not isSimple
+useHistNow = keepHistEntry
 
-plot(showChannel ? basis : na, "中线", color=color.new(color.white, 50), linewidth=1, style=plot.style_linebr)
+tfMin = timeframe.in_seconds() / 60.0
+isHtf = tfMin >= 240.0
+boxBarsUse = isHtf ? boxBarsHtf : boxBars
+boxRiskUse = isHtf ? boxRiskHtf : boxRiskPct
+wickUse = isHtf ? minWickHtf : minWickPct
+springWin = isHtf ? math.max(springConfirm, 2) : springConfirm
 
-// ========== 标签 ==========
-var label lastLabel = na
-if showLabels and trend != trend[1]
-    label.delete(lastLabel)
-    txt = trend == 1 ? "趋势多" : "趋势空"
-    col = trend == 1 ? #00E676 : #FF5252
-    yPos = trend == 1 ? low : high
-    lastLabel := label.new(bar_index, yPos, txt,
-         style = trend == 1 ? label.style_label_up : label.style_label_down,
-         color = col, textcolor = color.white, size = size.normal)
+ema20  = ta.ema(close, ema20Len)
+ema50  = ta.ema(close, ema50Len)
+ema100 = ta.ema(close, ema100Len)
+ema200 = ta.ema(close, ema200Len)
+stackBull = ema20 > ema50 and ema50 > ema100 and ema100 > ema200
+stackBear = ema20 < ema50 and ema50 < ema100 and ema100 < ema200
+channelBull = stackBull
+holdBull = ema50 > ema200
+holdBear = ema50 < ema200
+biasUp = ema50 > ema200 and close > ema200
+biasDown = ema50 < ema200 and close < ema200
 
-isWatchShort = trend == -1 and math.abs(close - basis) < atr * 0.6
-isRebound    = trend == 1 and close > close[1] and low < low[1] and close[1] < close[2]
+atr = ta.atr(atrLen)
+basis = ema50
+u = ta.sma(basis + atr * atrMult, smooth)
+l = ta.sma(basis - atr * atrMult, smooth)
+mid = (u + l) * 0.5
+rsiVal = ta.rsi(close, rsiLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+pdLow = request.security(syminfo.tickerid, "D", low[1], lookahead = barmerge.lookahead_off)
+pdHigh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_off)
 
-if showLabels and isWatchShort and not isWatchShort[1]
-    label.new(bar_index, high, "观望空",
-         style=label.style_label_down,
-         color=#E040FB,
-         textcolor=color.white,
-         size=size.small)
+ready = bar_index > math.max(ema200Len, hhLookback)
+ready := ready and not na(atr) and atr > 0 and not na(u) and not na(l)
+confirmed = barstate.isconfirmed
+channelColor = channelBull ? #00E676 : #FF5252
+fillColor = channelBull ? color.new(#00E676, 78) : color.new(#FF5252, 78)
 
-if showLabels and isRebound
-    label.new(bar_index, low, "反弹",
-         style=label.style_label_up,
-         color=#00BCD4,
-         textcolor=color.white,
-         size=size.small)
+plot(showEMAs ? ema20 : na, "EMA20", color = colEma20, linewidth = 2)
+plot(showEMAs ? ema50 : na, "EMA50", color = colEma50, linewidth = 2)
+plot(showEMAs ? ema100 : na, "EMA100", color = colEma100, linewidth = 2)
+plot(showEMAs ? ema200 : na, "EMA200", color = colEma200, linewidth = 3)
+pU = plot(showChannel ? u : na, "上轨", color = channelColor, linewidth = lineWidth)
+plot(showChannel ? mid : na, "中线", color = color.new(#90CAF9, 35), linewidth = 1)
+pL = plot(showChannel ? l : na, "下轨", color = channelColor, linewidth = lineWidth)
+fill(pU, pL, color = showChannel ? fillColor : na)
+
+panelLoc = panelPosStr == "左上" ? position.top_left : panelPosStr == "右上" ? position.top_right : panelPosStr == "左下" ? position.bottom_left : position.bottom_right
+var table panel = table.new(panelLoc, 2, 5, bgcolor = color.new(#0D1117, 18), border_color = color.new(#78909C, 50), border_width = 1, frame_color = color.new(#90A4AE, 45), frame_width = 1)
+
+var label ema20Lab = na
+var label ema50Lab = na
+var label ema100Lab = na
+var label ema200Lab = na
+
+barRange = math.max(high - low, syminfo.mintick)
+lowWick = math.min(open, close) - low
+upWick = high - math.max(open, close)
+lowWickOk = lowWick / barRange >= wickUse
+upWickOk = upWick / barRange >= wickUse
+
+swingLow = ta.lowest(low[1], swingLook)
+swingHigh = ta.highest(high[1], swingLook)
+pivL = ta.pivotlow(low, pivotLen, pivotLen)
+pivH = ta.pivothigh(high, pivotLen, pivotLen)
+var float lastPL = na
+var float prevPL = na
+var float lastPH = na
+var float prevPH = na
+if not na(pivL)
+    prevPL := lastPL
+    lastPL := pivL
+if not na(pivH)
+    prevPH := lastPH
+    lastPH := pivH
+eql = not na(lastPL) and not na(prevPL) and math.abs(lastPL - prevPL) <= atr * eqTolAtr
+eqh = not na(lastPH) and not na(prevPH) and math.abs(lastPH - prevPH) <= atr * eqTolAtr
+sslPivot = eql ? math.min(lastPL, prevPL) : lastPL
+bslPivot = eqh ? math.max(lastPH, prevPH) : lastPH
+
+sweepSwingLow = useSwingPool and low < swingLow and close > swingLow
+sweepPivotLow = usePivotPool and not na(sslPivot) and low < sslPivot and close > sslPivot
+sweepPdLow = usePrevDay and not na(pdLow) and low < pdLow and close > pdLow
+bullSweep = confirmed and lowWickOk and (sweepSwingLow or sweepPivotLow or sweepPdLow)
+sweepSwingHigh = useSwingPool and high > swingHigh and close < swingHigh
+sweepPivotHigh = usePivotPool and not na(bslPivot) and high > bslPivot and close < bslPivot
+sweepPdHigh = usePrevDay and not na(pdHigh) and high > pdHigh and close < pdHigh
+bearSweepSame = confirmed and upWickOk and (sweepSwingHigh or sweepPivotHigh or sweepPdHigh)
+
+var float pendHighPx = na
+var float pendHighLvl = na
+var float pendHighWick = na
+var int pendHighBar = na
+pierceHigh = confirmed and (high > swingHigh or (not na(bslPivot) and high > bslPivot) or (usePrevDay and not na(pdHigh) and high > pdHigh))
+if pierceHigh
+    pendHighPx := high
+    pendHighLvl := math.max(swingHigh, nz(bslPivot, swingHigh))
+    if usePrevDay and not na(pdHigh)
+        pendHighLvl := math.max(pendHighLvl, pdHigh)
+    pendHighWick := upWick / barRange
+    pendHighBar := bar_index
+if not na(pendHighBar) and bar_index - pendHighBar > springWin
+    pendHighPx := na
+    pendHighLvl := na
+    pendHighWick := na
+    pendHighBar := na
+highWickPass = upWickOk or (not na(pendHighWick) and pendHighWick >= wickUse)
+bearSweepWin = confirmed and not na(pendHighBar) and bar_index - pendHighBar <= springWin
+bearSweepWin := bearSweepWin and close < pendHighLvl and close <= open and highWickPass
+bearSweepTop = bearSweepSame or bearSweepWin
+
+boxHi = ta.highest(high[1], boxBarsUse)
+boxLo = ta.lowest(low[1], boxBarsUse)
+boxH = boxHi - boxLo
+boxOk = useBox and ready and boxH >= atr * boxMinAtr and boxH <= atr * boxMaxAtr
+
+var float pendBoxLo = na
+var float pendSweepPx = na
+var float pendWickPct = na
+var int pendSweepBar = na
+pierceNow = confirmed and boxOk and low < boxLo
+if pierceNow
+    pendBoxLo := boxLo
+    pendSweepPx := low
+    pendWickPct := lowWick / barRange
+    pendSweepBar := bar_index
+if not na(pendSweepBar) and bar_index - pendSweepBar > springWin
+    pendBoxLo := na
+    pendSweepPx := na
+    pendWickPct := na
+    pendSweepBar := na
+wickPass = lowWickOk or (not na(pendWickPct) and pendWickPct >= wickUse)
+reclaimNow = confirmed and not na(pendSweepBar) and bar_index - pendSweepBar <= springWin
+reclaimNow := reclaimNow and close > pendBoxLo and close >= open and wickPass
+sweepBoxLow = reclaimNow
+
+var float springLow = na
+var int springBar = na
+var bool springUsed = false
+var bool breakUsed = false
+var bool springNoted = false
+var box boxDraw = na
+if sweepBoxLow
+    springLow := pendSweepPx
+    springBar := bar_index
+    springNoted := true
+if not na(springBar) and bar_index - springBar > boxLife
+    springLow := na
+    springBar := na
+    springUsed := false
+    breakUsed := false
+    springNoted := false
+springAlive = springNoted and not na(springBar) and bar_index - springBar <= boxLife
+
+if showBox and barstate.islast
+    if not na(boxDraw)
+        box.delete(boxDraw)
+    if boxOk
+        boxDraw := box.new(bar_index - boxBarsUse, boxHi, bar_index, boxLo, border_color = color.new(#26A69A, 40), bgcolor = color.new(#26A69A, 92), border_width = 1)
+
+rsiLowN = ta.lowest(rsiVal, 8)
+rsiHighN = ta.highest(rsiVal, 8)
+rsiUp = rsiVal > rsiVal[1]
+rsiDn = rsiVal < rsiVal[1]
+rsiNewLow = rsiVal < rsiLowN[1]
+nearHigh = high >= ta.highest(high, 20) * 0.995
+blockLongHigh = rsiVal >= rsiHot and nearHigh
+touchedSup = low <= ema20 or low <= ema50 or low[1] <= ema20 or low[1] <= ema50
+touchedRes = high >= ema20 or high >= ema50 or high[1] >= ema20 or high[1] >= ema50
+recL = close > ema20 and close >= open
+recS = close < ema20 and close <= open
+rsiLongOk = rsiLowN <= rsiDipLong and rsiVal >= rsiResetLong and rsiUp
+rsiShortOk = rsiHighN >= rsiDipShort and rsiVal <= rsiResetShort and rsiDn
+rsiSpringOk = rsiUp and not rsiNewLow and rsiLowN <= rsiSpringMax
+rsiBreakOk = rsiUp and rsiVal >= rsiBreakMin
+
+var int lastTrendBar = 0
+var int lastFadeBar = 0
+var int lastIgnBar = 0
+var int lastBoxBar = 0
+var int lastStopBar = 0
+var int waveLongUsed = 0
+var int waveShortUsed = 0
+coolT = bar_index - lastTrendBar >= cooldownTrend
+coolF = bar_index - lastFadeBar >= fadeCool
+coolI = bar_index - lastIgnBar >= ignitionCool
+coolB = bar_index - lastBoxBar >= 3
+coolStop = bar_index - lastStopBar >= 6
+if not holdBull
+    waveLongUsed := 0
+if not holdBear
+    waveShortUsed := 0
+waveOkLong = not onePerWave or waveLongUsed == 0
+waveOkShort = not onePerWave or waveShortUsed == 0
+
+longSetup = ready and confirmed and coolT and biasUp and stackBull and not blockLongHigh
+longSetup := longSetup and waveOkLong and touchedSup and recL and rsiLongOk and bullSweep
+shortSetup = ready and confirmed and coolT and biasDown and stackBear
+shortSetup := shortSetup and waveOkShort and touchedRes and recS and rsiShortOk
+shortSetup := shortSetup and close < ema200 and bearSweepTop
+
+emaMax = math.max(math.max(ema20, ema50), math.max(ema100, ema200))
+emaMin = math.min(math.min(ema20, ema50), math.min(ema100, ema200))
+emaSpread = emaMax - emaMin
+wasCompressed = ta.lowest(emaSpread, baseBars) <= atr * compressAtr
+baseHigh = ta.highest(high[1], baseBars)
+baseLow = ta.lowest(low[1], baseBars)
+crossUp200 = ta.crossover(close, ema200)
+crossUp50 = ta.crossover(close, ema50)
+crossDn200 = ta.crossunder(close, ema200)
+crossDn50 = ta.crossunder(close, ema50)
+
+ignitionLongSetup = useIgnition and ready and confirmed and coolI and not blockLongHigh
+ignitionLongSetup := ignitionLongSetup and close > ema200 and close > ema50 and wasCompressed
+ignitionLongSetup := ignitionLongSetup and (close > baseHigh or crossUp200 or (crossUp50 and close > ema200))
+ignitionShortSetup = useIgnition and ready and confirmed and coolI
+ignitionShortSetup := ignitionShortSetup and close < ema200 and close < ema50 and wasCompressed
+ignitionShortSetup := ignitionShortSetup and (close < baseLow or crossDn200 or (crossDn50 and close < ema200))
+
+var int pendIgnDir = 0
+var int pendIgnBar = na
+if confirmed and ignitionLongSetup and pendIgnDir == 0
+    pendIgnDir := 1
+    pendIgnBar := bar_index
+if confirmed and ignitionShortSetup and pendIgnDir == 0
+    pendIgnDir := -1
+    pendIgnBar := bar_index
+if pendIgnDir != 0 and not na(pendIgnBar) and bar_index - pendIgnBar > ignitionWait
+    pendIgnDir := 0
+    pendIgnBar := na
+
+ignLongRetest = pendIgnDir == 1 and confirmed and bar_index > pendIgnBar and not blockLongHigh
+ignLongRetest := ignLongRetest and low <= math.max(ema20, ema50)
+ignLongRetest := ignLongRetest and close > ema20 and close >= open and bullSweep and rsiLongOk
+ignShortRetest = pendIgnDir == -1 and confirmed and bar_index > pendIgnBar
+ignShortRetest := ignShortRetest and high >= math.min(ema20, ema50)
+ignShortRetest := ignShortRetest and close < ema20 and close <= open and rsiShortOk
+ignShortRetest := ignShortRetest and close < ema200 and bearSweepTop
+
+strongUp = adx >= strongAdx and diPlus > diMinus
+strongDown = adx >= strongAdx and diMinus > diPlus
+allowSpring = not blockSpringDown or not strongDown
+
+boxSpringLong = useBox and ready and confirmed and coolB and coolStop and sweepBoxLow
+boxSpringLong := boxSpringLong and not springUsed and rsiSpringOk and allowSpring
+boxBreakLong = useBox and ready and confirmed and springAlive and not breakUsed and coolStop and not blockLongHigh
+boxBreakLong := boxBreakLong and close > boxHi and close >= open and rsiBreakOk
+
+priorHH = ta.highest(high[1], hhLookback)
+priorLL = ta.lowest(low[1], hhLookback)
+hhBar = ta.highestbars(high[1], hhLookback)
+llBar = ta.lowestbars(low[1], hhLookback)
+rsiAtPriorHH = rsiVal[math.abs(hhBar) + 1]
+rsiAtPriorLL = rsiVal[math.abs(llBar) + 1]
+bearDiv = rsiVal <= rsiAtPriorHH
+bullDiv = rsiVal >= rsiAtPriorLL
+rsiTurnDown = rsiDn and rsiHighN >= rsiFadeMin
+rsiTurnUp = rsiUp and rsiLowN <= 32
+rsiClimax = rsiVal >= rsiFadeMin or rsiHighN >= rsiFadeMin
+allowFadeShort = not blockStrongTrend or not strongUp or rsiClimax
+allowFadeLong = not blockStrongTrend or not strongDown
+backInShort = close < priorHH and (not requireBackIn or close < ema20 or close < pendHighLvl)
+backInLong = close > priorLL and (not requireBackIn or close > ema20)
+rsiOkShort = rsiClimax and (not requireDiv or bearDiv) and (not requireTurn or rsiTurnDown)
+rsiOkLong = rsiVal <= 32 and (not requireDiv or bullDiv) and (not requireTurn or rsiTurnUp)
+premium = close > ema50
+
+fadeHighSetup = useFadeHigh and ready and confirmed and coolF and allowFadeShort and premium
+fadeHighSetup := fadeHighSetup and bearSweepTop and backInShort and close <= open and rsiOkShort
+fadeLowSetup = useFadeLow and ready and confirmed and coolF and allowFadeLong
+fadeLowSetup := fadeLowSetup and low <= priorLL and backInLong
+fadeLowSetup := fadeLowSetup and close > open and rsiOkLong and bullSweep
+
+fibAt(a, b, r) =>
+    a + (b - a) * r
+px6(x) =>
+    str.tostring(x, "#.000000")
+sweepLongSL() =>
+    px = not na(pendSweepPx) ? math.min(low, pendSweepPx) : low
+    px - math.max(atr * slPadAtr, close * 0.0003)
+sweepShortSL() =>
+    px = not na(pendHighPx) ? math.max(high, pendHighPx) : high
+    px + math.max(atr * slPadAtr, close * 0.0003)
+fillLong(ep) =>
+    math.min(close, math.max(low, ep))
+fillShort(ep) =>
+    math.max(close, math.min(high, ep))
+tightLongEntry(sp) =>
+    gap = math.min(close * maxEntryPct / 100.0, atr * 0.15)
+    raw = math.min(close, sp + math.max(gap, atr * minRiskAtr))
+    fillLong(raw)
+tightShortEntry(sp) =>
+    gap = math.min(close * maxEntryPct / 100.0, atr * 0.15)
+    raw = math.max(close, sp - math.max(gap, atr * minRiskAtr))
+    fillShort(raw)
+oteLongEntry(sp, hi, lo) =>
+    tight = tightLongEntry(sp)
+    cap = sp + math.min(close * maxEntryPct / 100.0, atr * 0.15)
+    ote = fibAt(hi, lo, fibOte)
+    raw = useFib ? math.max(tight, math.min(close, ote)) : tight
+    fillLong(math.min(raw, cap))
+oteShortEntry(sp, lo, hi) =>
+    tight = tightShortEntry(sp)
+    cap = sp - math.min(close * maxEntryPct / 100.0, atr * 0.15)
+    ote = fibAt(lo, hi, fibOte)
+    raw = useFib ? math.min(tight, math.max(close, ote)) : tight
+    fillShort(math.max(raw, cap))
+riskOkLong(ep, sp, cap) =>
+    dist = ep - sp
+    dist > 0 and dist <= ep * cap / 100.0 and dist >= atr * minRiskAtr and ep >= low and ep <= high
+riskOkShort(ep, sp, cap) =>
+    dist = sp - ep
+    dist > 0 and dist <= ep * cap / 100.0 and dist >= atr * minRiskAtr and ep >= low and ep <= high
+sigText(tag, ep, sp, tp) =>
+    tag + " " + str.format_time(time, "MM-dd HH:mm") + "\n入场 " + px6(ep) + "\n止损 " + px6(sp) + "\n止盈 " + px6(tp)
+shortSig(tag) =>
+    tag + " " + str.format_time(time, "MM-dd HH:mm")
+barTxt(tag, ep, sp, tp) =>
+    isFull ? sigText(tag, ep, sp, tp) : shortSig(tag)
+longTp(ep, sp, lo, hi) =>
+    rFloor = ep + (ep - sp) * fibTpMain
+    r1618 = useFib ? fibAt(lo, hi, fibTpMain) : rFloor
+    r2618 = useFib ? fibAt(lo, hi, fibTpExt) : ep + (ep - sp) * fibTpExt
+    ext = (stackBull or holdBull) ? math.max(r1618, r2618) : r1618
+    math.max(math.max(ext, rFloor), math.max(u, hi))
+shortTp(ep, sp, hi, lo) =>
+    rFloor = ep - (sp - ep) * fibTpMain
+    r1618 = useFib ? fibAt(hi, lo, fibTpMain) : rFloor
+    r2618 = useFib ? fibAt(hi, lo, fibTpExt) : ep - (sp - ep) * fibTpExt
+    ext = (stackBear or holdBear) ? math.min(r1618, r2618) : r1618
+    math.min(math.min(ext, rFloor), math.min(l, lo))
+fadeLongTp(ep, sp, lo, hi) =>
+    rFloor = ep + (ep - sp) * 1.0
+    fibT = useFib ? fibAt(hi, lo, fibOte) : rFloor
+    math.max(math.max(fibT, mid), rFloor)
+fadeShortTp(ep, sp, hi, lo) =>
+    rFloor = ep - (sp - ep) * 1.0
+    t1 = math.min(ema50, mid)
+    fibT = useFib ? fibAt(lo, hi, fibOte) : t1
+    math.min(math.min(fibT, t1), rFloor)
+
+var int posDir = 0
+var float entryPrice = na
+var float slPrice = na
+var float tpPrice = na
+var float initRisk = na
+var int entryBar = na
+var bool beMoved = false
+var bool trailed = false
+var line entryLine = na
+var line slLine = na
+var line tpLine = na
+var line entryStem = na
+var label liveLab = na
+var label slLab = na
+var label tpLab = na
+var box riskBox = na
+var label histLab = na
+var array<label> histArr = array.new_label()
+var int histBar = na
+var float histPx = na
+var color lastTradeCol = #455A64
+
+posName() =>
+    posDir == 1 ? "回踩多" : posDir == 2 ? "失败多" : posDir == 3 ? "启动多" : posDir == 4 ? "弹簧多" : posDir == 5 ? "弹簧箱破" : posDir == -1 ? "回踩空" : posDir == -2 ? "失败空" : posDir == -3 ? "启动空" : "空仓"
+
+isLong = posDir == 1 or posDir == 2 or posDir == 3 or posDir == 4 or posDir == 5
+isShort = posDir == -1 or posDir == -2 or posDir == -3
+hitSL = (isLong and not na(slPrice) and low <= slPrice) or (isShort and not na(slPrice) and high >= slPrice)
+hitTP = (isLong and not na(tpPrice) and high >= tpPrice) or (isShort and not na(tpPrice) and low <= tpPrice)
+trendExit = ((posDir == 1 or posDir == 3) and holdBear) or ((posDir == -1 or posDir == -3) and holdBull)
+timedOut = posDir != 0 and not na(entryBar) and bar_index - entryBar >= maxHoldBars
+badA = na(slPrice) or na(tpPrice) or slPrice <= 0 or tpPrice <= 0
+badB = isLong and (slPrice >= entryPrice or tpPrice <= entryPrice)
+badC = isShort and (slPrice <= entryPrice or tpPrice >= entryPrice)
+badLv = posDir != 0 and (badA or badB or badC)
+
+nearHist(ep) =>
+    useHistNow and not na(histBar) and array.size(histArr) > 0 and bar_index - histBar <= mergeBars and math.abs(ep - histPx) / ep <= 0.004
+
+if confirmed and (hitSL or hitTP or trendExit or timedOut or badLv)
+    if hitSL
+        lastStopBar := bar_index
+    if not na(entryLine)
+        line.delete(entryLine)
+    if not na(slLine)
+        line.delete(slLine)
+    if not na(tpLine)
+        line.delete(tpLine)
+    if not na(entryStem)
+        line.delete(entryStem)
+    if not na(liveLab)
+        label.delete(liveLab)
+    if not na(slLab)
+        label.delete(slLab)
+    if not na(tpLab)
+        label.delete(tpLab)
+    if not na(riskBox)
+        box.delete(riskBox)
+    posDir := 0
+    entryPrice := na
+    slPrice := na
+    tpPrice := na
+    initRisk := na
+    entryBar := na
+    beMoved := false
+    trailed := false
+    entryLine := na
+    slLine := na
+    tpLine := na
+    entryStem := na
+    liveLab := na
+    slLab := na
+    tpLab := na
+    riskBox := na
+
+if confirmed and posDir != 0 and not na(initRisk) and initRisk > 0
+    if useBe and not beMoved
+        if isLong and high >= entryPrice + initRisk
+            slPrice := entryPrice
+            beMoved := true
+        if isShort and low <= entryPrice - initRisk
+            slPrice := entryPrice
+            beMoved := true
+    trailLong = posDir == 1 or posDir == 3 or posDir == 4 or posDir == 5
+    trailShort = posDir == -1 or posDir == -3
+    if useTrailEma and beMoved and (trailLong or trailShort)
+        if isLong and high >= entryPrice + initRisk * trailAfterR
+            trailPx = ema20 - atr * slPadAtr
+            if trailPx > slPrice and trailPx < close
+                slPrice := trailPx
+                trailed := true
+        if isShort and low <= entryPrice - initRisk * trailAfterR
+            trailPx = ema20 + atr * slPadAtr
+            if trailPx < slPrice and trailPx > close
+                slPrice := trailPx
+                trailed := true
+    if not na(slLine)
+        line.set_y1(slLine, slPrice)
+        line.set_y2(slLine, slPrice)
+    if useSlTpLabs and not na(slLab)
+        label.set_y(slLab, slPrice)
+        slTxt = trailed ? "止损跟踪 " : beMoved ? "止损保本 " : "止损 "
+        label.set_text(slLab, slTxt + px6(slPrice))
+
+boxSpringEntry = posDir == 0 and boxSpringLong
+boxBreakUpgrade = posDir == 4 and boxBreakLong
+boxBreakEntry = posDir == 0 and boxBreakLong and not boxSpringEntry
+fadeHighEntry = posDir == 0 and fadeHighSetup and not boxSpringEntry
+ignLongEntry = posDir == 0 and ignLongRetest and not boxSpringEntry and not boxBreakEntry and not fadeHighEntry
+ignShortEntry = posDir == 0 and ignShortRetest and not ignLongEntry and not boxSpringEntry and not boxBreakEntry and not fadeHighEntry
+fadeLowEntry = posDir == 0 and fadeLowSetup and not ignLongEntry and not ignShortEntry and not boxSpringEntry and not boxBreakEntry and not fadeHighEntry
+longEntry = posDir == 0 and longSetup and not fadeLowEntry and not fadeHighEntry and not ignLongEntry and not ignShortEntry and not boxSpringEntry and not boxBreakEntry
+shortEntry = posDir == 0 and shortSetup and not fadeLowEntry and not fadeHighEntry and not ignLongEntry and not ignShortEntry and not boxSpringEntry and not boxBreakEntry
+
+addHist(ep, txt, tip, col, longSide) =>
+    label out = na
+    if useHistNow
+        y = longSide ? low : high
+        sty = longSide ? label.style_label_up : label.style_label_down
+        showTxt = isSimple ? "·" : txt
+        if nearHist(ep)
+            last = array.get(histArr, array.size(histArr) - 1)
+            label.set_text(last, showTxt)
+            label.set_y(last, y)
+            label.set_tooltip(last, tip)
+            out := last
+        else
+            lab = label.new(bar_index, y, showTxt, style = sty, color = color.new(col, 25), textcolor = color.white, size = size.tiny, tooltip = tip)
+            array.push(histArr, lab)
+            if array.size(histArr) > histKeep
+                old = array.shift(histArr)
+                label.delete(old)
+            out := lab
+    out
+
+plotSpring = false
+plotBreak = false
+plotLong = false
+plotShort = false
+plotIgnL = false
+plotIgnS = false
+plotFadeH = false
+plotFadeL = false
+
+if boxBreakUpgrade
+    rawSL = not na(springLow) ? springLow - math.max(atr * slPadAtr, close * 0.0003) : slPrice
+    sp = math.min(rawSL, entryPrice - atr * minRiskAtr)
+    f0 = not na(springLow) ? springLow : sp
+    tp = longTp(entryPrice, sp, f0, boxHi)
+    if tp > entryPrice
+        slPrice := math.min(slPrice, sp)
+        tpPrice := tp
+        initRisk := entryPrice - slPrice
+        posDir := 5
+        breakUsed := true
+        lastBoxBar := bar_index
+        tip = sigText("弹簧箱破", entryPrice, slPrice, tp)
+        txt = barTxt("弹簧箱破", entryPrice, slPrice, tp)
+        plotBreak := true
+        if not na(tpLine)
+            line.set_y1(tpLine, tp)
+            line.set_y2(tpLine, tp)
+        if not na(slLine)
+            line.set_y1(slLine, slPrice)
+            line.set_y2(slLine, slPrice)
+        if not na(entryStem)
+            line.set_y1(entryStem, slPrice)
+            line.set_y2(entryStem, tp)
+        if not na(liveLab)
+            label.set_text(liveLab, isSimple ? "·" : txt)
+            label.set_tooltip(liveLab, tip)
+        if useSlTpLabs and not na(tpLab)
+            label.set_y(tpLab, tp)
+            label.set_text(tpLab, "止盈 " + px6(tp))
+        if useHistNow and nearHist(entryPrice)
+            last = array.get(histArr, array.size(histArr) - 1)
+            label.set_text(last, isSimple ? "·" : txt)
+            label.set_tooltip(last, tip)
+        lastTradeCol := #00897B
+
+if boxSpringEntry
+    rawSL = sweepLongSL()
+    ep = tightLongEntry(rawSL)
+    sp = math.min(rawSL, ep - atr * minRiskAtr)
+    f0 = not na(pendSweepPx) ? pendSweepPx : sp
+    tp = longTp(ep, sp, f0, boxHi)
+    ok = riskOkLong(ep, sp, boxRiskUse) and tp > ep
+    if ok
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryStem)
+            line.delete(entryStem)
+        if not na(liveLab)
+            label.delete(liveLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tpLab)
+            label.delete(tpLab)
+        if not na(riskBox)
+            box.delete(riskBox)
+        entryPrice := ep
+        slPrice := sp
+        tpPrice := tp
+        initRisk := ep - sp
+        entryBar := bar_index
+        posDir := 4
+        beMoved := false
+        trailed := false
+        lastBoxBar := bar_index
+        springUsed := true
+        lastTradeCol := #26A69A
+        plotSpring := true
+        tip = sigText("弹簧多", ep, sp, tp)
+        txt = barTxt("弹簧多", ep, sp, tp)
+        entryLine := line.new(entryBar, ep, bar_index, ep, color = #26A69A, width = 2)
+        slLine := line.new(entryBar, sp, bar_index, sp, color = #FF5252, width = 2, style = line.style_dashed)
+        tpLine := line.new(entryBar, tp, bar_index, tp, color = #00E676, width = 2, style = line.style_dashed)
+        entryStem := line.new(entryBar, sp, entryBar, tp, color = color.new(#26A69A, 40), width = 2)
+        liveLab := label.new(entryBar, low, isSimple ? "·" : txt, style = label.style_label_up, color = #26A69A, textcolor = color.white, size = size.tiny, tooltip = tip)
+        if useSlTpLabs
+            slLab := label.new(bar_index, sp, "止损 " + px6(sp), style = label.style_label_left, color = #FF5252, textcolor = color.white, size = size.tiny)
+            tpLab := label.new(bar_index, tp, "止盈 " + px6(tp), style = label.style_label_left, color = #00E676, textcolor = color.white, size = size.tiny)
+        if useRiskBoxNow
+            riskBox := box.new(entryBar, ep, bar_index, sp, border_color = color.new(#26A69A, 40), bgcolor = color.new(#26A69A, 90), border_width = 1)
+        histLab := addHist(ep, txt, tip, #26A69A, true)
+        histBar := bar_index
+        histPx := ep
+
+if boxBreakEntry
+    rawSL = not na(springLow) ? springLow - math.max(atr * slPadAtr, close * 0.0003) : sweepLongSL()
+    ep = tightLongEntry(rawSL)
+    sp = math.min(rawSL, ep - atr * minRiskAtr)
+    f0 = not na(springLow) ? springLow : sp
+    tp = longTp(ep, sp, f0, boxHi)
+    ok = riskOkLong(ep, sp, boxRiskUse) and tp > ep
+    if ok
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryStem)
+            line.delete(entryStem)
+        if not na(liveLab)
+            label.delete(liveLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tpLab)
+            label.delete(tpLab)
+        if not na(riskBox)
+            box.delete(riskBox)
+        entryPrice := ep
+        slPrice := sp
+        tpPrice := tp
+        initRisk := ep - sp
+        entryBar := bar_index
+        posDir := 5
+        beMoved := false
+        trailed := false
+        lastBoxBar := bar_index
+        breakUsed := true
+        lastTradeCol := #00897B
+        tag = nearHist(ep) ? "弹簧箱破" : "箱破多"
+        plotBreak := true
+        tip = sigText(tag, ep, sp, tp)
+        txt = barTxt(tag, ep, sp, tp)
+        entryLine := line.new(entryBar, ep, bar_index, ep, color = #00897B, width = 2)
+        slLine := line.new(entryBar, sp, bar_index, sp, color = #FF5252, width = 2, style = line.style_dashed)
+        tpLine := line.new(entryBar, tp, bar_index, tp, color = #00E676, width = 2, style = line.style_dashed)
+        entryStem := line.new(entryBar, sp, entryBar, tp, color = color.new(#00897B, 40), width = 2)
+        liveLab := label.new(entryBar, low, isSimple ? "·" : txt, style = label.style_label_up, color = #00897B, textcolor = color.white, size = size.tiny, tooltip = tip)
+        if useSlTpLabs
+            slLab := label.new(bar_index, sp, "止损 " + px6(sp), style = label.style_label_left, color = #FF5252, textcolor = color.white, size = size.tiny)
+            tpLab := label.new(bar_index, tp, "止盈 " + px6(tp), style = label.style_label_left, color = #00E676, textcolor = color.white, size = size.tiny)
+        if useRiskBoxNow
+            riskBox := box.new(entryBar, ep, bar_index, sp, border_color = color.new(#00897B, 40), bgcolor = color.new(#00897B, 90), border_width = 1)
+        histLab := addHist(ep, txt, tip, #00897B, true)
+        histBar := bar_index
+        histPx := ep
+
+if fadeHighEntry
+    rawSL = sweepShortSL()
+    ep = tightShortEntry(rawSL)
+    sp = math.max(rawSL, ep + atr * minRiskAtr)
+    f1 = not na(pendHighPx) ? pendHighPx : sp
+    tp = fadeShortTp(ep, sp, f1, ema50)
+    ok = riskOkShort(ep, sp, fadeRiskPct) and tp > 0 and tp < ep
+    if ok
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryStem)
+            line.delete(entryStem)
+        if not na(liveLab)
+            label.delete(liveLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tpLab)
+            label.delete(tpLab)
+        if not na(riskBox)
+            box.delete(riskBox)
+        entryPrice := ep
+        slPrice := sp
+        tpPrice := tp
+        initRisk := sp - ep
+        entryBar := bar_index
+        posDir := -2
+        beMoved := false
+        trailed := false
+        lastFadeBar := bar_index
+        lastTradeCol := #FF9800
+        plotFadeH := true
+        tip = sigText("失败空", ep, sp, tp)
+        txt = barTxt("失败空", ep, sp, tp)
+        entryLine := line.new(entryBar, ep, bar_index, ep, color = #FF9800, width = 2)
+        slLine := line.new(entryBar, sp, bar_index, sp, color = #FF5252, width = 2, style = line.style_dashed)
+        tpLine := line.new(entryBar, tp, bar_index, tp, color = #00E676, width = 2, style = line.style_dashed)
+        entryStem := line.new(entryBar, tp, entryBar, sp, color = color.new(#FF9800, 40), width = 2)
+        liveLab := label.new(entryBar, high, isSimple ? "·" : txt, style = label.style_label_down, color = #FF9800, textcolor = color.black, size = size.tiny, tooltip = tip)
+        if useSlTpLabs
+            slLab := label.new(bar_index, sp, "止损 " + px6(sp), style = label.style_label_left, color = #FF5252, textcolor = color.white, size = size.tiny)
+            tpLab := label.new(bar_index, tp, "止盈 " + px6(tp), style = label.style_label_left, color = #00E676, textcolor = color.white, size = size.tiny)
+        if useRiskBoxNow
+            riskBox := box.new(entryBar, ep, bar_index, sp, border_color = color.new(#FF9800, 40), bgcolor = color.new(#FF9800, 90), border_width = 1)
+        histLab := addHist(ep, txt, tip, #FF9800, false)
+        histBar := bar_index
+        histPx := ep
+
+if longEntry
+    rawSL = sweepLongSL()
+    ep = oteLongEntry(rawSL, swingHigh, math.min(swingLow, rawSL))
+    sp = math.min(rawSL, ep - atr * minRiskAtr)
+    tp = longTp(ep, sp, sp, swingHigh)
+    ok = riskOkLong(ep, sp, maxRiskPct) and tp > ep
+    if ok
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryStem)
+            line.delete(entryStem)
+        if not na(liveLab)
+            label.delete(liveLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tpLab)
+            label.delete(tpLab)
+        if not na(riskBox)
+            box.delete(riskBox)
+        entryPrice := ep
+        slPrice := sp
+        tpPrice := tp
+        initRisk := ep - sp
+        entryBar := bar_index
+        posDir := 1
+        beMoved := false
+        trailed := false
+        lastTrendBar := bar_index
+        waveLongUsed := 1
+        lastTradeCol := colPull
+        plotLong := true
+        tip = sigText("回踩多", ep, sp, tp)
+        txt = barTxt("回踩多", ep, sp, tp)
+        entryLine := line.new(entryBar, ep, bar_index, ep, color = colPull, width = 2)
+        slLine := line.new(entryBar, sp, bar_index, sp, color = #FF5252, width = 2, style = line.style_dashed)
+        tpLine := line.new(entryBar, tp, bar_index, tp, color = #00E676, width = 2, style = line.style_dashed)
+        entryStem := line.new(entryBar, sp, entryBar, tp, color = color.new(colPull, 40), width = 2)
+        liveLab := label.new(entryBar, low, isSimple ? "·" : txt, style = label.style_label_up, color = colPull, textcolor = color.black, size = size.tiny, tooltip = tip)
+        if useSlTpLabs
+            slLab := label.new(bar_index, sp, "止损 " + px6(sp), style = label.style_label_left, color = #FF5252, textcolor = color.white, size = size.tiny)
+            tpLab := label.new(bar_index, tp, "止盈 " + px6(tp), style = label.style_label_left, color = #00E676, textcolor = color.white, size = size.tiny)
+        if useRiskBoxNow
+            riskBox := box.new(entryBar, ep, bar_index, sp, border_color = color.new(#FF5252, 50), bgcolor = color.new(#FF5252, 90), border_width = 1)
+        histLab := addHist(ep, txt, tip, #00E676, true)
+        histBar := bar_index
+        histPx := ep
+
+if ignLongEntry
+    rawSL = sweepLongSL()
+    ep = oteLongEntry(rawSL, baseHigh, math.min(baseLow, rawSL))
+    sp = math.min(rawSL, ep - atr * minRiskAtr)
+    tp = longTp(ep, sp, sp, math.max(baseHigh, swingHigh))
+    ok = riskOkLong(ep, sp, maxRiskPct) and tp > ep
+    if ok
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryStem)
+            line.delete(entryStem)
+        if not na(liveLab)
+            label.delete(liveLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tpLab)
+            label.delete(tpLab)
+        if not na(riskBox)
+            box.delete(riskBox)
+        entryPrice := ep
+        slPrice := sp
+        tpPrice := tp
+        initRisk := ep - sp
+        entryBar := bar_index
+        posDir := 3
+        beMoved := false
+        trailed := false
+        lastIgnBar := bar_index
+        waveLongUsed := 1
+        pendIgnDir := 0
+        pendIgnBar := na
+        lastTradeCol := #2962FF
+        plotIgnL := true
+        tip = sigText("启动多", ep, sp, tp)
+        txt = barTxt("启动多", ep, sp, tp)
+        entryLine := line.new(entryBar, ep, bar_index, ep, color = #2962FF, width = 2)
+        slLine := line.new(entryBar, sp, bar_index, sp, color = #FF5252, width = 2, style = line.style_dashed)
+        tpLine := line.new(entryBar, tp, bar_index, tp, color = #00E676, width = 2, style = line.style_dashed)
+        entryStem := line.new(entryBar, sp, entryBar, tp, color = color.new(#2962FF, 40), width = 2)
+        liveLab := label.new(entryBar, low, isSimple ? "·" : txt, style = label.style_label_up, color = #2962FF, textcolor = color.white, size = size.tiny, tooltip = tip)
+        if useSlTpLabs
+            slLab := label.new(bar_index, sp, "止损 " + px6(sp), style = label.style_label_left, color = #FF5252, textcolor = color.white, size = size.tiny)
+            tpLab := label.new(bar_index, tp, "止盈 " + px6(tp), style = label.style_label_left, color = #00E676, textcolor = color.white, size = size.tiny)
+        if useRiskBoxNow
+            riskBox := box.new(entryBar, ep, bar_index, sp, border_color = color.new(#2962FF, 40), bgcolor = color.new(#2962FF, 88), border_width = 1)
+        histLab := addHist(ep, txt, tip, #2962FF, true)
+        histBar := bar_index
+        histPx := ep
+
+if fadeLowEntry
+    rawSL = sweepLongSL()
+    ep = tightLongEntry(rawSL)
+    sp = math.min(rawSL, ep - atr * minRiskAtr)
+    tp = fadeLongTp(ep, sp, sp, priorHH)
+    ok = riskOkLong(ep, sp, maxRiskPct) and tp > ep
+    if ok
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryStem)
+            line.delete(entryStem)
+        if not na(liveLab)
+            label.delete(liveLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tpLab)
+            label.delete(tpLab)
+        if not na(riskBox)
+            box.delete(riskBox)
+        entryPrice := ep
+        slPrice := sp
+        tpPrice := tp
+        initRisk := ep - sp
+        entryBar := bar_index
+        posDir := 2
+        beMoved := false
+        trailed := false
+        lastFadeBar := bar_index
+        lastTradeCol := #00BCD4
+        plotFadeL := true
+        tip = sigText("失败多", ep, sp, tp)
+        txt = barTxt("失败多", ep, sp, tp)
+        entryLine := line.new(entryBar, ep, bar_index, ep, color = #00BCD4, width = 2)
+        slLine := line.new(entryBar, sp, bar_index, sp, color = #FF5252, width = 2, style = line.style_dashed)
+        tpLine := line.new(entryBar, tp, bar_index, tp, color = #00E676, width = 2, style = line.style_dashed)
+        entryStem := line.new(entryBar, sp, entryBar, tp, color = color.new(#00BCD4, 40), width = 2)
+        liveLab := label.new(entryBar, low, isSimple ? "·" : txt, style = label.style_label_up, color = #00BCD4, textcolor = color.black, size = size.tiny, tooltip = tip)
+        if useSlTpLabs
+            slLab := label.new(bar_index, sp, "止损 " + px6(sp), style = label.style_label_left, color = #FF5252, textcolor = color.white, size = size.tiny)
+            tpLab := label.new(bar_index, tp, "止盈 " + px6(tp), style = label.style_label_left, color = #00E676, textcolor = color.white, size = size.tiny)
+        if useRiskBoxNow
+            riskBox := box.new(entryBar, ep, bar_index, sp, border_color = color.new(#00BCD4, 40), bgcolor = color.new(#00BCD4, 90), border_width = 1)
+        histLab := addHist(ep, txt, tip, #00BCD4, true)
+        histBar := bar_index
+        histPx := ep
+
+if ignShortEntry
+    rawSL = sweepShortSL()
+    ep = oteShortEntry(rawSL, baseLow, math.max(baseHigh, rawSL))
+    sp = math.max(rawSL, ep + atr * minRiskAtr)
+    tp = shortTp(ep, sp, sp, math.min(baseLow, swingLow))
+    ok = riskOkShort(ep, sp, maxRiskPct) and tp > 0 and tp < ep
+    if ok
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryStem)
+            line.delete(entryStem)
+        if not na(liveLab)
+            label.delete(liveLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tpLab)
+            label.delete(tpLab)
+        if not na(riskBox)
+            box.delete(riskBox)
+        entryPrice := ep
+        slPrice := sp
+        tpPrice := tp
+        initRisk := sp - ep
+        entryBar := bar_index
+        posDir := -3
+        beMoved := false
+        trailed := false
+        lastIgnBar := bar_index
+        waveShortUsed := 1
+        pendIgnDir := 0
+        pendIgnBar := na
+        lastTradeCol := #7C4DFF
+        plotIgnS := true
+        tip = sigText("启动空", ep, sp, tp)
+        txt = barTxt("启动空", ep, sp, tp)
+        entryLine := line.new(entryBar, ep, bar_index, ep, color = #7C4DFF, width = 2)
+        slLine := line.new(entryBar, sp, bar_index, sp, color = #FF5252, width = 2, style = line.style_dashed)
+        tpLine := line.new(entryBar, tp, bar_index, tp, color = #00E676, width = 2, style = line.style_dashed)
+        entryStem := line.new(entryBar, tp, entryBar, sp, color = color.new(#7C4DFF, 40), width = 2)
+        liveLab := label.new(entryBar, high, isSimple ? "·" : txt, style = label.style_label_down, color = #7C4DFF, textcolor = color.white, size = size.tiny, tooltip = tip)
+        if useSlTpLabs
+            slLab := label.new(bar_index, sp, "止损 " + px6(sp), style = label.style_label_left, color = #FF5252, textcolor = color.white, size = size.tiny)
+            tpLab := label.new(bar_index, tp, "止盈 " + px6(tp), style = label.style_label_left, color = #00E676, textcolor = color.white, size = size.tiny)
+        if useRiskBoxNow
+            riskBox := box.new(entryBar, ep, bar_index, sp, border_color = color.new(#7C4DFF, 40), bgcolor = color.new(#7C4DFF, 88), border_width = 1)
+        histLab := addHist(ep, txt, tip, #7C4DFF, false)
+        histBar := bar_index
+        histPx := ep
+
+if shortEntry
+    rawSL = sweepShortSL()
+    ep = oteShortEntry(rawSL, swingLow, math.max(swingHigh, rawSL))
+    sp = math.max(rawSL, ep + atr * minRiskAtr)
+    tp = shortTp(ep, sp, sp, swingLow)
+    ok = riskOkShort(ep, sp, maxRiskPct) and tp > 0 and tp < ep
+    if ok
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tpLine)
+            line.delete(tpLine)
+        if not na(entryStem)
+            line.delete(entryStem)
+        if not na(liveLab)
+            label.delete(liveLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tpLab)
+            label.delete(tpLab)
+        if not na(riskBox)
+            box.delete(riskBox)
+        entryPrice := ep
+        slPrice := sp
+        tpPrice := tp
+        initRisk := sp - ep
+        entryBar := bar_index
+        posDir := -1
+        beMoved := false
+        trailed := false
+        lastTrendBar := bar_index
+        waveShortUsed := 1
+        lastTradeCol := colPull
+        plotShort := true
+        tip = sigText("回踩空", ep, sp, tp)
+        txt = barTxt("回踩空", ep, sp, tp)
+        entryLine := line.new(entryBar, ep, bar_index, ep, color = colPull, width = 2)
+        slLine := line.new(entryBar, sp, bar_index, sp, color = #FF5252, width = 2, style = line.style_dashed)
+        tpLine := line.new(entryBar, tp, bar_index, tp, color = #00E676, width = 2, style = line.style_dashed)
+        entryStem := line.new(entryBar, tp, entryBar, sp, color = color.new(colPull, 40), width = 2)
+        liveLab := label.new(entryBar, high, isSimple ? "·" : txt, style = label.style_label_down, color = colPull, textcolor = color.black, size = size.tiny, tooltip = tip)
+        if useSlTpLabs
+            slLab := label.new(bar_index, sp, "止损 " + px6(sp), style = label.style_label_left, color = #FF5252, textcolor = color.white, size = size.tiny)
+            tpLab := label.new(bar_index, tp, "止盈 " + px6(tp), style = label.style_label_left, color = #00E676, textcolor = color.white, size = size.tiny)
+        if useRiskBoxNow
+            riskBox := box.new(entryBar, ep, bar_index, sp, border_color = color.new(#FF5252, 50), bgcolor = color.new(#FF5252, 90), border_width = 1)
+        histLab := addHist(ep, txt, tip, #FF5252, false)
+        histBar := bar_index
+        histPx := ep
+
+plotshape(plotSpring, title = "弹簧多", style = shape.triangleup, location = location.belowbar, color = #26A69A, size = size.tiny)
+plotshape(plotBreak, title = "箱破多", style = shape.diamond, location = location.belowbar, color = #00897B, size = size.tiny)
+plotshape(plotLong, title = "回踩多", style = shape.triangleup, location = location.belowbar, color = #00E676, size = size.tiny)
+plotshape(plotShort, title = "回踩空", style = shape.triangledown, location = location.abovebar, color = #FF5252, size = size.tiny)
+plotshape(plotIgnL, title = "启动多", style = shape.diamond, location = location.belowbar, color = #2962FF, size = size.tiny)
+plotshape(plotIgnS, title = "启动空", style = shape.diamond, location = location.abovebar, color = #7C4DFF, size = size.tiny)
+plotshape(plotFadeH, title = "失败空", style = shape.triangledown, location = location.abovebar, color = #FF9800, size = size.tiny)
+plotshape(plotFadeL, title = "失败多", style = shape.triangleup, location = location.belowbar, color = #00BCD4, size = size.tiny)
+
+if posDir != 0 and barstate.islast and not na(entryLine)
+    line.set_x2(entryLine, bar_index)
+    line.set_x2(slLine, bar_index)
+    line.set_x2(tpLine, bar_index)
+    if useSlTpLabs and not na(slLab)
+        label.set_x(slLab, bar_index)
+    if useSlTpLabs and not na(tpLab)
+        label.set_x(tpLab, bar_index)
+    if useRiskBoxNow and not na(riskBox)
+        box.set_right(riskBox, bar_index)
+
+if barstate.islast
+    if useEmaTagsNow
+        gap = math.max(nz(atr, close * 0.01) * 0.35, syminfo.mintick * 10.0)
+        y20 = ema20
+        y50 = ema50
+        y100 = ema100
+        y200 = ema200
+        if math.abs(y50 - y20) < gap
+            if y50 >= y20
+                y50 := y20 + gap
+            else
+                y20 := y50 + gap
+        if math.abs(y100 - y50) < gap
+            if y100 >= y50
+                y100 := y50 + gap
+            else
+                y50 := y100 + gap
+        if math.abs(y200 - y100) < gap
+            if y200 >= y100
+                y200 := y100 + gap
+            else
+                y100 := y200 + gap
+        if math.abs(y100 - y20) < gap
+            y100 := y20 + gap
+        if math.abs(y200 - y50) < gap
+            y200 := math.max(y200, y50 + gap)
+        if not na(ema20Lab)
+            label.delete(ema20Lab)
+        if not na(ema50Lab)
+            label.delete(ema50Lab)
+        if not na(ema100Lab)
+            label.delete(ema100Lab)
+        if not na(ema200Lab)
+            label.delete(ema200Lab)
+        ema20Lab := label.new(bar_index, y20, "20", style = label.style_label_left, color = colEma20, textcolor = color.white, size = size.tiny)
+        ema50Lab := label.new(bar_index, y50, "50", style = label.style_label_left, color = colEma50, textcolor = color.white, size = size.tiny)
+        ema100Lab := label.new(bar_index, y100, "100", style = label.style_label_left, color = colEma100, textcolor = color.white, size = size.tiny)
+        ema200Lab := label.new(bar_index, y200, "200", style = label.style_label_left, color = colEma200, textcolor = color.white, size = size.tiny)
+    else
+        if not na(ema20Lab)
+            label.delete(ema20Lab)
+            ema20Lab := na
+        if not na(ema50Lab)
+            label.delete(ema50Lab)
+            ema50Lab := na
+        if not na(ema100Lab)
+            label.delete(ema100Lab)
+            ema100Lab := na
+        if not na(ema200Lab)
+            label.delete(ema200Lab)
+            ema200Lab := na
+
+    slMark = trailed ? "止损跟踪" : beMoved ? "止损保本" : "止损"
+    head = posDir == 0 ? "空仓" : posName()
+    headCol = posDir == 0 ? color.new(#455A64, 20) : color.new(lastTradeCol, 15)
+    if isSimple and posDir == 0
+        table.clear(panel, 0, 0, 1, 4)
+    else
+        table.cell(panel, 0, 0, head, bgcolor = headCol, text_color = color.white, text_size = size.small)
+        table.cell(panel, 1, 0, posDir == 0 ? "" : str.format_time(time, "MM-dd HH:mm"), bgcolor = headCol, text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 0, 1, posDir == 0 ? "" : "入场", text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 1, 1, posDir == 0 ? "" : px6(entryPrice), text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 0, 2, posDir == 0 ? "" : slMark, text_color = color.new(#FF8A80, 0), text_size = size.tiny)
+        table.cell(panel, 1, 2, posDir == 0 ? "" : px6(slPrice), text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 0, 3, posDir == 0 ? "" : "止盈", text_color = color.new(#69F0AE, 0), text_size = size.tiny)
+        table.cell(panel, 1, 3, posDir == 0 ? "" : px6(tpPrice), text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 0, 4, posDir == 0 ? "等待信号" : isLong ? "多" : "空", text_color = color.white, text_size = size.tiny)
+        table.cell(panel, 1, 4, "", text_color = color.white, text_size = size.tiny)

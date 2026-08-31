@@ -1,0 +1,165 @@
+//@version=6
+strategy("百万Eric风格 趋势通道（主图专用）",
+     overlay = true,
+     pyramiding = 0,
+     process_orders_on_close = false,
+     initial_capital = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 10,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.04,
+     slippage = 80,
+     margin_long = 20,
+     margin_short = 20,
+     max_labels_count = 500)
+
+// ========== 通道 ==========
+len         = input.int(50, "通道基础长度", group = "趋势通道")
+atrLen      = input.int(14, "ATR长度", group = "趋势通道")
+atrMult     = input.float(1.8, "通道宽度倍数", step = 0.1, group = "趋势通道")
+smooth      = input.int(3, "通道平滑", group = "趋势通道")
+
+// ========== 显示 ==========
+showLabels  = input.bool(true, "显示趋势标签", group = "显示")
+showChannel = input.bool(true, "显示趋势通道", group = "显示")
+lineWidth   = input.int(3, "通道线宽", minval = 1, maxval = 5, group = "显示")
+tagLoose    = input.bool(true, "标签用宽松反弹(不下单)", group = "显示")
+
+// ========== 交易 ==========
+useTrade     = input.bool(true, "启用回测下单", group = "交易")
+onlyLong     = input.bool(true, "只做多", group = "交易")
+useFlipEntry = input.bool(false, "趋势翻多也开仓(默认关)", group = "交易")
+useRebEntry  = input.bool(true, "严格反弹开多", group = "交易")
+exitOnFlip   = input.bool(true, "有效翻空平多", group = "交易")
+takeUpper    = input.bool(true, "碰到上轨平一半", group = "交易")
+
+touchBuf     = input.float(0.10, "触及下轨缓冲ATR", step = 0.05, group = "反弹过滤")
+bodyMin      = input.float(0.15, "收回实体最小ATR", step = 0.05, group = "反弹过滤")
+reclaimBars  = input.int(3, "触下轨后收回等待", minval = 1, maxval = 6, group = "反弹过滤")
+coolReb      = input.int(6, "两次反弹最小间隔", minval = 1, group = "反弹过滤")
+coolExit     = input.int(5, "平仓后冷却", minval = 1, group = "反弹过滤")
+minChanAtr   = input.float(1.0, "最小通道宽度ATR", step = 0.1, group = "反弹过滤")
+flipBuf      = input.float(0.20, "翻多翻空缓冲ATR", step = 0.05, group = "反弹过滤")
+minSlAtr     = input.float(0.35, "最小止损ATR(不足弃单)", step = 0.05, group = "反弹过滤")
+slPadAtr     = input.float(0.20, "止损在低点外ATR", step = 0.05, group = "反弹过滤")
+
+// ========== 计算（与原指标一致）==========
+basis = ta.ema(close, len)
+atr   = ta.atr(atrLen)
+upper = basis + atr * atrMult
+lower = basis - atr * atrMult
+u = ta.sma(upper, smooth)
+l = ta.sma(lower, smooth)
+trend = close > basis ? 1 : close < basis ? -1 : 0
+
+chanW = u - l
+chanOk = not na(atr) and atr > 0 and chanW >= atr * minChanAtr
+body = math.abs(close - open)
+rangeBar = math.max(high - low, syminfo.mintick)
+closePos = (close - low) / rangeBar
+
+// 原版宽松反弹 / 观望空（只用于标签）
+isWatchShort = trend == -1 and math.abs(close - basis) < atr * 0.6
+isReboundLoose = trend == 1 and close > close[1] and low < low[1] and close[1] < close[2]
+
+// 有效穿越中线
+flipUp = close > basis + atr * flipBuf and close[1] <= basis + atr * flipBuf
+flipDn = close < basis - atr * flipBuf and close[1] >= basis - atr * flipBuf
+
+// 严格反弹：先踩下轨，再在窗口内收回中线
+touchLow = low <= l + atr * touchBuf
+touchLow2 = touchLow or low[1] <= l[1] + atr * touchBuf
+var int lastTouchBar = na
+if barstate.isconfirmed and trend == 1 and touchLow
+    lastTouchBar := bar_index
+if not na(lastTouchBar) and bar_index - lastTouchBar > reclaimBars
+    lastTouchBar := na
+
+inTouchWin = not na(lastTouchBar) and bar_index - lastTouchBar <= reclaimBars
+reclaim = close >= basis and close >= open and body >= atr * bodyMin and closePos >= 0.40
+isReboundStrict = trend == 1 and chanOk and touchLow2 and inTouchWin and reclaim
+
+var int lastRebBar = -999
+var int lastExitBar = -999
+coolRebOk = bar_index - lastRebBar >= coolReb
+coolExitOk = bar_index - lastExitBar >= coolExit
+
+longReb = useTrade and useRebEntry and barstate.isconfirmed and isReboundStrict and coolRebOk and coolExitOk
+longFlip = useTrade and useFlipEntry and barstate.isconfirmed and flipUp and chanOk and coolExitOk
+longSig = (longReb or longFlip) and strategy.position_size == 0
+shortSig = useTrade and not onlyLong and barstate.isconfirmed and flipDn and strategy.position_size == 0
+
+// ========== 画通道（原样）==========
+plot_u = plot(showChannel ? u : na, "上轨",
+     color = trend == 1 ? #00E676 : #FF5252,
+     linewidth = lineWidth)
+plot_l = plot(showChannel ? l : na, "下轨",
+     color = trend == 1 ? #00E676 : #FF5252,
+     linewidth = lineWidth)
+fill(plot_u, plot_l,
+     color = trend == 1 ? color.new(#00E676, 75) :
+             trend == -1 ? color.new(#FF5252, 75) :
+             color.new(color.gray, 90),
+     title = "趋势通道填充")
+plot(showChannel ? basis : na, "中线", color = color.new(color.white, 50), linewidth = 1, style = plot.style_linebr)
+
+// ========== 标签 ==========
+var label lastLabel = na
+if showLabels and trend != trend[1]
+    label.delete(lastLabel)
+    txt = trend == 1 ? "趋势多" : "趋势空"
+    col = trend == 1 ? #00E676 : #FF5252
+    yPos = trend == 1 ? low : high
+    lastLabel := label.new(bar_index, yPos, txt,
+         style = trend == 1 ? label.style_label_up : label.style_label_down,
+         color = col, textcolor = color.white, size = size.normal)
+
+if showLabels and isWatchShort and not isWatchShort[1]
+    label.new(bar_index, high, "观望空",
+         style = label.style_label_down,
+         color = #E040FB,
+         textcolor = color.white,
+         size = size.small)
+
+showReb = tagLoose ? isReboundLoose : isReboundStrict
+if showLabels and showReb and (tagLoose or not showReb[1])
+    label.new(bar_index, low, tagLoose ? "反弹" : "反弹入",
+         style = label.style_label_up,
+         color = tagLoose ? #00BCD4 : #00897B,
+         textcolor = color.white,
+         size = size.small)
+
+// ========== 下单 ==========
+rebLow = math.min(low, low[1])
+slLong = math.min(l, rebLow) - atr * slPadAtr
+if close - slLong < atr * minSlAtr
+    slLong := close - atr * minSlAtr
+slOk = close - slLong >= atr * minSlAtr and slLong < close
+
+if strategy.position_size[1] != 0 and strategy.position_size == 0
+    lastExitBar := bar_index
+
+if longSig and slOk
+    strategy.entry("L", strategy.long, comment = longFlip and not longReb ? "翻多" : "反弹")
+    strategy.exit("XL", from_entry = "L", stop = slLong, comment_loss = "SL")
+    if longReb
+        lastRebBar := bar_index
+        lastTouchBar := na
+
+if shortSig
+    slShort = math.max(u, high) + atr * slPadAtr
+    strategy.entry("S", strategy.short, comment = "翻空")
+    strategy.exit("XS", from_entry = "S", stop = slShort, comment_loss = "SL")
+
+if strategy.position_size > 0
+    strategy.exit("XL", from_entry = "L", stop = slLong, comment_loss = "SL")
+    if takeUpper and high >= u
+        strategy.close("L", qty_percent = 50, comment = "上轨减仓")
+    if exitOnFlip and flipDn
+        strategy.close("L", comment = "翻空平")
+
+if strategy.position_size < 0
+    slShortNow = math.max(u, high) + atr * slPadAtr
+    strategy.exit("XS", from_entry = "S", stop = slShortNow, comment_loss = "SL")
+    if flipUp
+        strategy.close("S", comment = "翻多平")
